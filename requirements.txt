@@ -1,0 +1,44 @@
+# Core Deep Learning
+# torch>=2.0.0
+# torchvision>=0.15.0
+torch==2.7.1 
+torchvision==0.22.1
+timm>=0.9.0
+
+# Scientific Computing
+numpy>=1.24.0
+scipy>=1.10.0
+pandas>=2.0.0
+
+# Machine Learning
+scikit-learn>=1.3.0
+xgboost>=2.0.0
+umap-learn>=0.5.3
+
+# Computer Vision
+opencv-python>=4.8.0
+Pillow>=10.0.0
+
+# Data Processing
+pyyaml>=6.0
+tqdm>=4.65.0
+joblib>=1.3.0
+black>=25.0.0
+# Visualization
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Utilities
+multipledispatch>=0.6.0
+barbar>=0.2.1
+tqdm>=4.65.0
+
+# EEG Processing (choose one)
+mne>=1.5.0  # Recommended for EEG processing
+# pyedflib>=0.1.30  # Alternative: uncomment if using pyedflib instead
+
+# Optional: RAFT for optical flow computation
+# Note: RAFT needs to be installed separately from:
+# https://github.com/princeton-vl/RAFT
+# raft-pytorch>=1.0.0  # Uncomment if using RAFT
+

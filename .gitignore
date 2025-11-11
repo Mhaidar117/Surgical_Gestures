@@ -1,0 +1,23 @@
+# Data files
+EEG/
+Eye/
+Gestures/
+cache/
+checkpoints/
+Prompts/
+Docs/
+
+# Plans
+full_scope_plan.md
+modularity_plan.md
+ViT_Upgrade_prompt.md
+README_EEG.md
+
+# Figures
+figs/
+
+# Logs
+logs/
+
+# Checkpoints
+checkpoints/

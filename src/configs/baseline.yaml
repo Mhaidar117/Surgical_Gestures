@@ -1,0 +1,36 @@
+# Baseline configuration (no brain alignment)
+model_name: vit_small_patch16_224
+pretrained: true
+freeze_until: 6
+use_adapters: false
+use_flow: false
+
+# Training
+batch_size: 16
+num_epochs: 10
+lr_base: 1e-4
+lr_vit: 1e-5
+lr_adapters: 5e-5
+weight_decay: 0.05
+warmup_epochs: 5
+grad_clip: 1.0
+
+# Loss weights
+loss_weights:
+  kin: 1.0
+  gesture: 1.0
+  skill: 0.5
+  brain: 0.0
+  control: 0.01
+
+# Brain alignment (disabled)
+brain_mode: none
+lambda_brain: 0.0
+
+# Decoder
+d_kin_output: 10
+teacher_forcing_decay_epochs: 40
+
+# Other
+save_every: 10
+
