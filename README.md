@@ -599,6 +599,16 @@ The safety module enforces:
 - **Torque limits**: Joint torque constraints
 - **Collision detection**: Basic collision checking
 
+## Trajectory Replay (`src/dvrk_replay/`)
+
+Replay and visualize recorded JIGSAW kinematics on dVRK simulation. See [`src/dvrk_replay/README.md`](src/dvrk_replay/README.md) for details.
+```bash
+# Visualize trajectories
+python src/dvrk_replay/kinematics_parser.py
+
+# Replay on simulation  
+python src/dvrk_replay/replay_trajectory.py
+```
 ## Usage Examples
 
 ### Basic Training
