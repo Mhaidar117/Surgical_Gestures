@@ -149,7 +149,10 @@ def main():
     # Configuration
     ARM_NAME = 'PSM1'  # Change to 'PSM2' if needed
     SOURCE_ARM = 'PSM1'  # Which arm's data to use from the file
-    FILEPATH = "/home/mai/JISSAW/Needle_Passing/kinematics/AllGestures/Needle_Passing_B001.txt"
+
+    # NOTE: Adjust FILEPATH to match your JIGSAW dataset location
+    # Expected structure: Gestures/[Task]/kinematics/AllGestures/[Trial].txt
+    FILEPATH = "Gestures/Needle_Passing/kinematics/AllGestures/Needle_Passing_B001.txt"
     
     # Create replay
     replay = JIGSAWReplay(arm_name=ARM_NAME)

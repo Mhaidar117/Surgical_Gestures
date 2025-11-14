@@ -155,8 +155,10 @@ class JIGSAWKinematics:
 # Example usage
 if __name__ == "__main__":
     # Load the data
-    filepath = "/home/mai/JISSAW/Needle_Passing/kinematics/AllGestures/Needle_Passing_B001.txt"
-    
+    # NOTE: Adjust filepath to match your JIGSAW dataset location
+    # Expected structure: Gestures/[Task]/kinematics/AllGestures/[Trial].txt
+    filepath = "Gestures/Needle_Passing/kinematics/AllGestures/Needle_Passing_B001.txt"
+
     print("Loading JIGSAW kinematics data...")
     kin = JIGSAWKinematics(filepath)
     
