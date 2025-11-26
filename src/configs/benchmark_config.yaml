@@ -1,0 +1,65 @@
+# Benchmark Configuration - MVP
+
+# Evaluation settings
+evaluation:
+  batch_size: 16
+  num_workers: 4
+  device: "auto"  # auto, cuda, mps, cpu
+
+# Metrics to compute
+metrics:
+  kinematics:
+    - position_rmse
+    - position_rmse_per_axis
+    - end_effector_error
+    - rotation_rmse
+    - rotation_geodesic_deg
+    - gripper_mae
+    - gripper_rmse
+
+  gesture:
+    - accuracy
+    - f1_macro
+    - f1_micro
+    - f1_weighted
+    - f1_per_class
+    - precision_per_class
+    - recall_per_class
+    - confusion_matrix
+
+  skill:
+    - accuracy
+    - f1_macro
+    - f1_weighted
+    - confusion_matrix
+    - per_class_metrics
+
+# Visualizations
+visualizations:
+  enabled: true
+  format: "png"
+  dpi: 300
+
+  plots:
+    - gesture_confusion_matrix
+    - skill_confusion_matrix
+    - per_class_gesture_metrics
+    - trajectory_samples
+    - position_error_distribution
+    - rotation_error_distribution
+    - kinematics_time_series
+
+  # Trajectory plot settings
+  trajectory:
+    num_samples: 5  # Number of sample trajectories to plot
+
+# Reports
+reports:
+  generate_text: true
+  generate_csv: true
+  generate_markdown: true
+
+# Output structure
+output:
+  create_timestamp_dir: true
+  save_predictions: false  # Don't save raw predictions to save space
