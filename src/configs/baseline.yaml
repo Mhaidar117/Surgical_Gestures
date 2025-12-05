@@ -7,7 +7,7 @@ use_flow: false
 
 # Training
 batch_size: 16
-num_epochs: 10
+num_epochs: 30
 lr_base: 1e-4
 lr_vit: 1e-5
 lr_adapters: 5e-5
@@ -28,7 +28,9 @@ brain_mode: none
 lambda_brain: 0.0
 
 # Decoder
-d_kin_output: 10
+# 19-dim for single arm: pos(3) + rot(9) + trans_vel(3) + rot_vel(3) + gripper(1)
+d_kin_input: 19
+d_kin_output: 19
 teacher_forcing_decay_epochs: 40
 
 # Other

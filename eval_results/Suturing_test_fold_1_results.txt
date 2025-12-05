@@ -1,0 +1,30 @@
+============================================================
+Evaluation Results: Suturing
+Mode: TEST
+Split: fold_1
+Checkpoint Epoch: 37
+============================================================
+
+Losses:
+  Total Loss: 0.631658
+  Kinematics Loss: 0.072292
+    - Position: 0.000083
+    - Rotation: 0.069094 (3.96°)
+    - Jaw: 0.002824
+  Gesture Loss: 0.559263
+  Skill Loss: 0.000206
+
+Kinematics Metrics:
+  Position RMSE: 0.013097
+  End-Effector Error: 0.019926
+  Rotation RMSE: 1.163411
+
+Gesture Classification:
+  Accuracy: 100.00%
+  F1 (Macro): 1.0000
+  F1 (Micro): 1.0000
+
+Skill Classification:
+  Accuracy: 100.00%
+  F1 (Macro): 1.0000
+============================================================

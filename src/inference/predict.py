@@ -3,7 +3,7 @@ Inference pipeline for kinematics prediction.
 """
 import torch
 import torch.nn as nn
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 from pathlib import Path
 import sys
 
@@ -33,6 +33,9 @@ def predict_kinematics(
     
     Returns:
         Predicted kinematics of shape (B, T, D) or (T, D)
+         
+         #output needs to be xyz in cartesian space and angles in degrees. Mai wants it to look just like the input from JIGSAW
+         
     """
     model.eval()
     device = next(model.parameters()).device

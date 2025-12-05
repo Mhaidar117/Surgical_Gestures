@@ -1,6 +1,60 @@
 # ViT-Based Surgical Gesture Recognition and Kinematics Prediction for dVRK
 
-This repository implements a Vision Transformer (ViT) system for surgical gesture recognition and kinematics prediction from video. The system processes surgical video frames to predict robot kinematics that can be executed safely on a da Vinci Research Kit (dVRK) single-arm robot. To use please add a Gestures folder with each subdirectory containing the gesture folder from JIGSAW. 
+This repository implements a Vision Transformer (ViT) system for surgical gesture recognition and kinematics prediction from video. The system processes surgical video frames to predict robot kinematics that can be executed safely on a da Vinci Research Kit (dVRK) single-arm robot. To use please add a Gestures folder with each subdirectory containing the gesture folder from JIGSAW.
+
+## Quick Start: 8-Fold LOUO Cross-Validation
+
+The standard evaluation protocol for JIGSAWS is **Leave-One-User-Out (LOUO)** cross-validation. This trains and evaluates a separate model for each fold, where each fold leaves out a different surgeon for testing. (updated from stratified sampling to create train/val/test sets)
+
+### 1. Generate Splits
+
+```bash
+python3 generate_splits.py
+```
+
+This creates 8-fold LOUO splits for all tasks in `data/splits/`.
+
+### 2. Run 8-Fold Training & Evaluation
+
+```bash
+# Run all tasks (Knot_Tying, Needle_Passing, Suturing) - all folds
+./run_8fold_louo.sh
+
+# Run only one task
+./run_8fold_louo.sh Knot_Tying
+
+# Run specific folds (e.g., folds 1-3 only)
+./run_8fold_louo.sh Knot_Tying 1 3
+```
+
+**Note**: This runs 8 training runs per task (23 total for all tasks). Each fold trains a separate model.
+
+### 3. Aggregate Results
+
+After training completes, compute mean ± std across folds:
+
+```bash
+python3 aggregate_louo_results.py
+```
+
+**Outputs:**
+- `louo_summary.txt` - Formatted summary with mean ± std (what you report in papers)
+- `louo_results.json` - Detailed results for further analysis
+
+### Split Summary
+
+| Task | Folds | Avg Train | Avg Val | Avg Test |
+|------|-------|-----------|---------|----------|
+| Knot_Tying | 8 | 27 trials | 4-5 trials | 4-5 trials |
+| Needle_Passing | 7 | 20 trials | 4 trials | 4 trials |
+| Suturing | 8 | 29 trials | 5 trials | 5 trials |
+
+Each fold uses:
+- **Train**: 6 surgeons
+- **Val**: 1 surgeon (for early stopping)
+- **Test**: 1 surgeon (held out, for final metrics)
+
+---
 
 ## Table of Contents
 
@@ -52,28 +106,42 @@ Surgical_Gestures/
 │   │   ├── adapters.py               # Adapter layers for personalization
 │   │   ├── temporal_transformer.py   # Temporal aggregation
 │   │   ├── decoder_autoreg.py        # Autoregressive decoder
-│   │   ├── kinematics.py              # Kinematics module with heads
+│   │   ├── kinematics.py             # Kinematics module with heads
 │   │   └── losses.py                 # Loss functions
 │   ├── training/                # Training infrastructure
 │   │   ├── train_vit_system.py       # Main training script
 │   │   └── optim.py                  # Optimizer/scheduler setup
 │   ├── eval/                    # Evaluation utilities
+│   │   ├── evaluate.py               # Model evaluation script
 │   │   ├── metrics.py                # Evaluation metrics
 │   │   └── postprocess.py            # Trajectory smoothing
 │   ├── safety/                  # Safety modules
 │   │   ├── filters.py                # Safety validation
 │   │   └── dvrk_interface.py         # dVRK simulator interface
 │   ├── inference/               # Inference pipeline
-│   │   └── predict.py                # Prediction utilities
+│   │   ├── predict.py                # Prediction utilities
+│   │   ├── extract_embeddings.py     # Extract model embeddings
+│   │   └── visualize_embeddings.py   # t-SNE/UMAP visualization
 │   └── configs/                 # Configuration files
 │       └── baseline.yaml
-├── scripts/                     # Preprocessing scripts
-│   └── precompute_raft.py           # RAFT flow computation (optional)
-├── Gestures/                    # JIGSAWS dataset
+├── data/
+│   └── splits/                  # LOUO cross-validation splits
+│       ├── Knot_Tying_splits.json
+│       ├── Needle_Passing_splits.json
+│       └── Suturing_splits.json
+├── Gestures/                    # JIGSAWS dataset (user-provided)
 │   ├── Knot_Tying/
 │   ├── Needle_Passing/
 │   └── Suturing/
-└── gesture_embedding/           # Legacy code (preserved)
+├── checkpoints/                 # Trained model checkpoints
+├── eval_results/                # Evaluation results per fold
+├── notebooks/
+│   └── results_visualization.ipynb   # Visualize results and embeddings
+├── generate_splits.py           # Generate LOUO splits
+├── run_8fold_louo.sh            # Run 8-fold cross-validation
+├── aggregate_louo_results.py    # Aggregate results across folds
+├── train_all_tasks.sh           # Train all tasks (single fold)
+└── evaluate_all_tasks.sh        # Evaluate all tasks (single fold)
 ```
 
 ## Data Format
@@ -377,9 +445,9 @@ Train the baseline model:
 python gesture_embedding/main.py \
     --mode vit_train \
     --source_directory . \
-    --transcriptions_path Knot_Tying \
+    --transcriptions_path Suturing \
     --weights_save_path src/configs/baseline.yaml \
-    --weights_save_folder checkpoints/baseline
+    --weights_save_folder checkpoints/baseline_psm2_suturing
 ```
 
 Or directly:
@@ -741,6 +809,15 @@ else:
 ## Citation
 
 If you use this code, please cite:
+
+```bibtex
+@software{scqc_agent,
+  title={ViT-Based Surgical Gesture Recognition and Kinematics Prediction for dVRK},
+  author={Michael Haidar, Mai Bui, Aaron Liu},
+  year={2025},
+  url={https://github.com/Mhaidar117/Surgical_Gestures}
+}
+```
 
 ```bibtex
 @article{jigsaws,
