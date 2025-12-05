@@ -6,7 +6,7 @@ from .decoder_autoreg import KinematicsDecoder, CrossAttnDecoderLayer, generate_
 from .kinematics import KinematicsModule, GestureHead, SkillHead
 from .losses import (
     kinematics_loss, rsa_loss, encoding_loss, control_regularizer,
-    compute_total_loss, rotation_6d_to_matrix, geodesic_distance,
+    compute_total_loss, rotation_6d_to_matrix, rotation_9d_to_matrix, geodesic_distance,
     jerk_penalty, velocity_penalty, acceleration_penalty
 )
 
@@ -17,7 +17,7 @@ __all__ = [
     'KinematicsDecoder', 'CrossAttnDecoderLayer', 'generate_causal_mask',
     'KinematicsModule', 'GestureHead', 'SkillHead',
     'kinematics_loss', 'rsa_loss', 'encoding_loss', 'control_regularizer',
-    'compute_total_loss', 'rotation_6d_to_matrix', 'geodesic_distance',
+    'compute_total_loss', 'rotation_6d_to_matrix', 'rotation_9d_to_matrix', 'geodesic_distance',
     'jerk_penalty', 'velocity_penalty', 'acceleration_penalty'
 ]
 

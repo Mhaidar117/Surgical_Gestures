@@ -1,12 +1,28 @@
 """
 Main training script for ViT-based system with config-driven loop.
+
+Usage:
+    # Train with proper LOUO split
+    python src/training/train_vit_system.py \
+        --config src/configs/baseline.yaml \
+        --data_root . \
+        --task Knot_Tying \
+        --split fold_1 \
+        --output_dir checkpoints/knot_tying_fold1
+
+    # Train on all data (no validation - not recommended)
+    python src/training/train_vit_system.py \
+        --config src/configs/baseline.yaml \
+        --data_root . \
+        --task Knot_Tying \
+        --output_dir checkpoints/knot_tying_all
 """
 import torch
 import torch.nn as nn
 import yaml
 import argparse
 from pathlib import Path
-from typing import Dict, Optional
+from typing import Dict, Optional, List
 import sys
 from tqdm import tqdm
 
@@ -32,7 +48,8 @@ except (ImportError, ValueError):
     get_optimizer = optim_module.get_optimizer
     get_scheduler = optim_module.get_scheduler
 from data import JIGSAWSViTDataset
-from torch.utils.data import DataLoader
+from data.split_loader import SplitLoader
+from torch.utils.data import DataLoader, Subset
 
 
 class EEGInformedViTModel(nn.Module):
@@ -79,14 +96,18 @@ class EEGInformedViTModel(nn.Module):
         
         # Kinematics module
         print("Creating kinematics module...")
+        # d_kin_input should match the dataset output:
+        # - 19 for single arm (PSM1 or PSM2): pos(3) + rot(9) + trans_vel(3) + rot_vel(3) + gripper(1)
+        d_kin_input = config.get('d_kin_input', 19)
+        d_kin_output = config.get('d_kin_output', 19)
         self.kinematics = KinematicsModule(
             d_model=384,
-            d_kin_input=76,
-            d_kin_output=config.get('d_kin_output', 10),
+            d_kin_input=d_kin_input,
+            d_kin_output=d_kin_output,
             num_gestures=15,
             num_skills=3
         )
-        print(f"  - d_kin_input: 76, d_kin_output: {config.get('d_kin_output', 10)}")
+        print(f"  - d_kin_input: {d_kin_input}, d_kin_output: {d_kin_output}")
         print(f"  - num_gestures: 15, num_skills: 3")
         
         # Brain RDM (training only)
@@ -206,6 +227,10 @@ def train_epoch(
             }
             eeg_rdm = model.brain_rdm.get_eeg_rdm(batch_meta, tau=config.get('tau', 0))
         
+        # Determine kinematics format based on output dimension
+        d_kin_output = config.get('d_kin_output', 19)
+        kin_format = '19d' if d_kin_output == 19 else '10d'
+
         # Compute loss
         loss, losses = compute_total_loss(
             outputs['kinematics'],
@@ -217,7 +242,8 @@ def train_epoch(
             model_rdm=model_rdm,
             eeg_rdm=eeg_rdm,
             brain_mode=config.get('brain_mode', 'none'),
-            loss_weights=config.get('loss_weights')
+            loss_weights=config.get('loss_weights'),
+            kinematics_format=kin_format
         )
         
         # Backward pass
@@ -244,8 +270,85 @@ def train_epoch(
     # Average losses
     avg_losses = {k: v / num_batches for k, v in component_losses.items()}
     avg_losses['total'] = total_loss / num_batches
-    
+
     return avg_losses
+
+
+def validate_epoch(
+    model: nn.Module,
+    dataloader: DataLoader,
+    device: torch.device,
+    config: Dict
+) -> Dict[str, float]:
+    """Validate for one epoch."""
+    model.eval()
+    total_loss = 0.0
+    component_losses = {}
+    num_batches = 0
+
+    with torch.no_grad():
+        pbar = tqdm(dataloader, desc="Validating", leave=False)
+
+        for batch in pbar:
+            # Move to device
+            rgb = batch['rgb'].to(device)
+            kinematics = batch['kinematics'].to(device)
+            gesture_labels = batch['gesture_label'].to(device)
+            skill_labels = batch['skill_label'].to(device)
+
+            # Forward pass (no teacher forcing during validation)
+            outputs = model(
+                rgb,
+                target_kinematics=kinematics,
+                teacher_forcing_prob=0.0
+            )
+
+            # Determine kinematics format based on output dimension
+            d_kin_output = config.get('d_kin_output', 19)
+            kin_format = '19d' if d_kin_output == 19 else '10d'
+
+            # Compute loss
+            loss, losses = compute_total_loss(
+                outputs['kinematics'],
+                kinematics,
+                outputs['gesture_logits'],
+                gesture_labels,
+                outputs['skill_logits'],
+                skill_labels,
+                loss_weights=config.get('loss_weights'),
+                kinematics_format=kin_format
+            )
+
+            # Accumulate losses
+            total_loss += loss.item()
+            for k, v in losses.items():
+                if k not in component_losses:
+                    component_losses[k] = 0.0
+                component_losses[k] += v.item() if isinstance(v, torch.Tensor) else v
+            num_batches += 1
+
+            pbar.set_postfix({'val_loss': f'{loss.item():.4f}'})
+
+    # Average losses
+    avg_losses = {k: v / num_batches for k, v in component_losses.items()}
+    avg_losses['total'] = total_loss / num_batches
+
+    return avg_losses
+
+
+def filter_dataset_by_trials(
+    dataset: JIGSAWSViTDataset,
+    trial_ids: List[str]
+) -> Subset:
+    """Filter dataset to only include samples from specific trials."""
+    indices = []
+    for idx in range(len(dataset)):
+        sample_trial = dataset.samples[idx].get('trial_id', '')
+        for tid in trial_ids:
+            if tid in sample_trial or sample_trial in tid:
+                indices.append(idx)
+                break
+    return Subset(dataset, indices)
 
 
 def main():
@@ -254,15 +357,19 @@ def main():
     parser.add_argument('--data_root', type=str, required=True, help='Data root directory')
     parser.add_argument('--task', type=str, default='Knot_Tying', help='Task name')
     parser.add_argument('--output_dir', type=str, default='checkpoints', help='Output directory')
-    
+    parser.add_argument('--arm', type=str, default='PSM2', help='Arm to use (PSM1 or PSM2)')
+    parser.add_argument('--split', type=str, default=None,
+                        help='LOUO split name (e.g., fold_1). If None, uses all data (no validation).')
+
     args = parser.parse_args()
-    
+
     print("\n" + "=" * 60)
     print("ViT Training System")
     print("=" * 60)
     print(f"Config file: {args.config}")
     print(f"Data root: {args.data_root}")
     print(f"Task: {args.task}")
+    print(f"Split: {args.split if args.split else 'None (using all data)'}")
     print(f"Output directory: {args.output_dir}")
     print("=" * 60)
     
@@ -297,21 +404,51 @@ def main():
     
     # Create dataset
     print(f"\nLoading dataset (task: {args.task})...")
-    dataset = JIGSAWSViTDataset(
+    full_dataset = JIGSAWSViTDataset(
         data_root=args.data_root,
         task=args.task,
-        mode='train'
+        mode='train',
+        arm=args.arm
     )
-    print(f"  - Dataset size: {len(dataset)} samples")
-    
-    dataloader = DataLoader(
-        dataset, 
-        batch_size=config.get('batch_size', 16), 
+    print(f"  - Full dataset size: {len(full_dataset)} samples")
+
+    # Apply split if specified
+    val_dataloader = None
+    if args.split is not None:
+        print(f"\nApplying LOUO split: {args.split}")
+        split_loader = SplitLoader(args.data_root, args.task, args.split)
+
+        train_trials = split_loader.get_train_trials()
+        val_trials = split_loader.get_val_trials()
+
+        print(f"  - Train trials ({len(train_trials)}): {train_trials}")
+        print(f"  - Val trials ({len(val_trials)}): {val_trials}")
+
+        train_dataset = filter_dataset_by_trials(full_dataset, train_trials)
+        val_dataset = filter_dataset_by_trials(full_dataset, val_trials)
+
+        print(f"  - Train samples: {len(train_dataset)}")
+        print(f"  - Val samples: {len(val_dataset)}")
+
+        val_dataloader = DataLoader(
+            val_dataset,
+            batch_size=config.get('batch_size', 16),
+            shuffle=False,
+            num_workers=0
+        )
+    else:
+        print("\n  WARNING: No split specified. Training on ALL data (no validation).")
+        print("  Consider using --split fold_1 for proper train/val separation.")
+        train_dataset = full_dataset
+
+    train_dataloader = DataLoader(
+        train_dataset,
+        batch_size=config.get('batch_size', 16),
         shuffle=True,
         num_workers=0  # Set to 0 for MPS compatibility
     )
     print(f"  - Batch size: {config.get('batch_size', 16)}")
-    print(f"  - Number of batches per epoch: {len(dataloader)}")
+    print(f"  - Number of training batches per epoch: {len(train_dataloader)}")
     
     # Create optimizer and scheduler
     print("\nSetting up optimizer and scheduler...")
@@ -343,41 +480,82 @@ def main():
     print("\n" + "=" * 60)
     print("Starting Training")
     print("=" * 60)
-    
+
+    # Track best validation loss for model selection
+    best_val_loss = float('inf')
+    best_epoch = -1
+
     # Main training loop with progress bar
     epoch_pbar = tqdm(range(num_epochs), desc="Training Progress", position=0)
-    
+
     for epoch in epoch_pbar:
-        losses = train_epoch(model, dataloader, optimizer, device, config, epoch)
+        # Training
+        train_losses = train_epoch(model, train_dataloader, optimizer, device, config, epoch)
         scheduler.step()
-        
+
+        # Validation (if split is specified)
+        val_losses = None
+        if val_dataloader is not None:
+            val_losses = validate_epoch(model, val_dataloader, device, config)
+
         # Update epoch progress bar
-        epoch_pbar.set_postfix({
-            'loss': f"{losses['total']:.4f}",
-            'kin': f"{losses.get('kin', 0):.4f}",
-            'gest': f"{losses.get('gesture', 0):.4f}",
+        postfix = {
+            'train': f"{train_losses['total']:.4f}",
             'lr': f"{scheduler.get_last_lr()[0]:.6f}"
-        })
-        
+        }
+        if val_losses is not None:
+            postfix['val'] = f"{val_losses['total']:.4f}"
+        epoch_pbar.set_postfix(postfix)
+
         # Print detailed losses every epoch
         print(f"\nEpoch {epoch+1}/{num_epochs} Summary:")
-        print(f"  Total Loss: {losses['total']:.6f}")
-        print(f"  Kinematics Loss: {losses.get('kin', 0):.6f}")
-        if 'kin_pos' in losses:
-            print(f"    - Position: {losses['kin_pos']:.6f}")
-        if 'kin_rot' in losses:
-            print(f"    - Rotation: {losses['kin_rot']:.6f} ({losses.get('kin_rot_deg', 0):.2f}°)")
-        if 'kin_jaw' in losses:
-            print(f"    - Jaw: {losses['kin_jaw']:.6f}")
-        print(f"  Gesture Loss: {losses.get('gesture', 0):.6f}")
-        print(f"  Skill Loss: {losses.get('skill', 0):.6f}")
-        if 'brain_rsa' in losses:
-            print(f"  Brain RSA Loss: {losses['brain_rsa']:.6f}")
-        if 'brain_encoding' in losses:
-            print(f"  Brain Encoding Loss: {losses['brain_encoding']:.6f}")
+        print(f"  [TRAIN]")
+        print(f"    Total Loss: {train_losses['total']:.6f}")
+        print(f"    Kinematics Loss: {train_losses.get('kin', 0):.6f}")
+        if 'kin_pos' in train_losses:
+            print(f"      - Position: {train_losses['kin_pos']:.6f}")
+        if 'kin_rot' in train_losses:
+            print(f"      - Rotation: {train_losses['kin_rot']:.6f} ({train_losses.get('kin_rot_deg', 0):.2f}°)")
+        if 'kin_jaw' in train_losses:
+            print(f"      - Jaw: {train_losses['kin_jaw']:.6f}")
+        print(f"    Gesture Loss: {train_losses.get('gesture', 0):.6f}")
+        print(f"    Skill Loss: {train_losses.get('skill', 0):.6f}")
+
+        if val_losses is not None:
+            print(f"  [VAL]")
+            print(f"    Total Loss: {val_losses['total']:.6f}")
+            print(f"    Kinematics Loss: {val_losses.get('kin', 0):.6f}")
+            if 'kin_pos' in val_losses:
+                print(f"      - Position: {val_losses['kin_pos']:.6f}")
+            if 'kin_rot' in val_losses:
+                print(f"      - Rotation: {val_losses['kin_rot']:.6f} ({val_losses.get('kin_rot_deg', 0):.2f}°)")
+            if 'kin_jaw' in val_losses:
+                print(f"      - Jaw: {val_losses['kin_jaw']:.6f}")
+            print(f"    Gesture Loss: {val_losses.get('gesture', 0):.6f}")
+            print(f"    Skill Loss: {val_losses.get('skill', 0):.6f}")
+
+            # Track best model
+            if val_losses['total'] < best_val_loss:
+                best_val_loss = val_losses['total']
+                best_epoch = epoch + 1
+                # Save best model
+                best_path = output_dir / 'best_model.pth'
+                checkpoint = {
+                    'epoch': epoch,
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'config': config,
+                    'train_losses': train_losses,
+                    'val_losses': val_losses,
+                    'split': args.split,
+                    'task': args.task
+                }
+                torch.save(checkpoint, best_path)
+                print(f"  ★ New best model saved (val_loss: {best_val_loss:.6f})")
+
         print(f"  Learning Rate: {scheduler.get_last_lr()[0]:.6f}")
-        
-        # Save checkpoint
+
+        # Save periodic checkpoint
         if (epoch + 1) % config.get('save_every', 10) == 0:
             checkpoint_path = output_dir / f'checkpoint_epoch_{epoch+1}.pth'
             checkpoint = {
@@ -385,15 +563,36 @@ def main():
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'config': config,
-                'losses': losses
+                'train_losses': train_losses,
+                'val_losses': val_losses,
+                'split': args.split,
+                'task': args.task
             }
             torch.save(checkpoint, checkpoint_path)
             print(f"  ✓ Checkpoint saved: {checkpoint_path}")
-    
+
+    # Save final model
+    final_path = output_dir / 'final_model.pth'
+    checkpoint = {
+        'epoch': num_epochs - 1,
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'config': config,
+        'train_losses': train_losses,
+        'val_losses': val_losses,
+        'split': args.split,
+        'task': args.task
+    }
+    torch.save(checkpoint, final_path)
+
     print("\n" + "=" * 60)
     print("Training Complete!")
     print("=" * 60)
-    print(f"Final checkpoint saved to: {output_dir}")
+    print(f"Task: {args.task}")
+    print(f"Split: {args.split if args.split else 'None (all data)'}")
+    print(f"Final model saved to: {final_path}")
+    if best_epoch > 0:
+        print(f"Best model (epoch {best_epoch}, val_loss: {best_val_loss:.6f}): {output_dir / 'best_model.pth'}")
 
 
 if __name__ == '__main__':

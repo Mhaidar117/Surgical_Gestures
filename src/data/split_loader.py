@@ -16,28 +16,31 @@ def generate_louo_splits(
 ) -> Dict[str, Dict[str, List[str]]]:
     """
     Generate 8-fold LOUO splits based on surgeon IDs.
-    
+
     Args:
         data_root: Root directory containing Gestures/ folder
         task: Task name
         output_dir: Directory to save split files, None uses data_root/data/splits/
-    
+
     Returns:
         Dictionary mapping fold names to train/val/test trial lists
     """
     data_root = Path(data_root)
     meta_file = data_root / 'Gestures' / task / f'meta_file_{task}.txt'
-    
+
     # Group trials by surgeon ID
     surgeon_trials = defaultdict(list)
-    
+
     if meta_file.exists():
         with open(meta_file, 'r') as f:
             for line in f:
                 parts = line.strip().split('\t')
-                if len(parts) >= 2:
+                if len(parts) >= 1:
                     trial_id = parts[0]
-                    surgeon_id = parts[1] if len(parts) > 1 else 'Unknown'
+                    # Extract surgeon ID from trial name (e.g., "Knot_Tying_B001" -> "B")
+                    # Format: {Task}_{SurgeonID}{TrialNum}
+                    trial_suffix = trial_id.replace(f'{task}_', '')
+                    surgeon_id = trial_suffix[0] if trial_suffix else 'Unknown'
                     surgeon_trials[surgeon_id].append(trial_id)
     
     # Get unique surgeon IDs
