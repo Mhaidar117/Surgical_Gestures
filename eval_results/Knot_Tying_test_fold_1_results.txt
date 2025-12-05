@@ -1,0 +1,30 @@
+============================================================
+Evaluation Results: Knot_Tying
+Mode: TEST
+Split: fold_1
+Checkpoint Epoch: 2
+============================================================
+
+Losses:
+  Total Loss: 2.235920
+  Kinematics Loss: 0.012867
+    - Position: 0.068100
+    - Rotation: 1.595951 (91.44°)
+    - Jaw: 0.012867
+  Gesture Loss: 1.806157
+  Skill Loss: 0.833793
+
+Kinematics Metrics:
+  Position RMSE: 0.373518
+  End-Effector Error: 0.621188
+  Rotation RMSE: 0.843593
+
+Gesture Classification:
+  Accuracy: 24.32%
+  F1 (Macro): 0.1126
+  F1 (Micro): 0.2432
+
+Skill Classification:
+  Accuracy: 70.27%
+  F1 (Macro): 0.4127
+============================================================

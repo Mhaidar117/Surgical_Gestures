@@ -1,0 +1,30 @@
+============================================================
+Evaluation Results: Needle_Passing
+Mode: TEST
+Split: fold_1
+Checkpoint Epoch: 7
+============================================================
+
+Losses:
+  Total Loss: 1.144127
+  Kinematics Loss: 0.145815
+    - Position: 0.000629
+    - Rotation: 0.139600 (8.00°)
+    - Jaw: 0.004513
+  Gesture Loss: 0.980110
+  Skill Loss: 0.036405
+
+Kinematics Metrics:
+  Position RMSE: 0.036575
+  End-Effector Error: 0.058603
+  Rotation RMSE: 0.711886
+
+Gesture Classification:
+  Accuracy: 79.10%
+  F1 (Macro): 0.7916
+  F1 (Micro): 0.7910
+
+Skill Classification:
+  Accuracy: 100.00%
+  F1 (Macro): 1.0000
+============================================================

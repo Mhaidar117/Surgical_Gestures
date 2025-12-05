@@ -1,0 +1,282 @@
+{
+  "fold_1": {
+    "train": [
+      "Needle_Passing_D001",
+      "Needle_Passing_D002",
+      "Needle_Passing_D003",
+      "Needle_Passing_D004",
+      "Needle_Passing_D005",
+      "Needle_Passing_E001",
+      "Needle_Passing_E003",
+      "Needle_Passing_E004",
+      "Needle_Passing_E005",
+      "Needle_Passing_F001",
+      "Needle_Passing_F003",
+      "Needle_Passing_F004",
+      "Needle_Passing_H002",
+      "Needle_Passing_H004",
+      "Needle_Passing_H005",
+      "Needle_Passing_I002",
+      "Needle_Passing_I003",
+      "Needle_Passing_I004",
+      "Needle_Passing_I005"
+    ],
+    "val": [
+      "Needle_Passing_C001",
+      "Needle_Passing_C002",
+      "Needle_Passing_C003",
+      "Needle_Passing_C004",
+      "Needle_Passing_C005"
+    ],
+    "test": [
+      "Needle_Passing_B001",
+      "Needle_Passing_B002",
+      "Needle_Passing_B003",
+      "Needle_Passing_B004"
+    ],
+    "test_surgeon": "B",
+    "val_surgeon": "C",
+    "test_skill": "N",
+    "val_skill": "I"
+  },
+  "fold_2": {
+    "train": [
+      "Needle_Passing_B001",
+      "Needle_Passing_B002",
+      "Needle_Passing_B003",
+      "Needle_Passing_B004",
+      "Needle_Passing_E001",
+      "Needle_Passing_E003",
+      "Needle_Passing_E004",
+      "Needle_Passing_E005",
+      "Needle_Passing_F001",
+      "Needle_Passing_F003",
+      "Needle_Passing_F004",
+      "Needle_Passing_H002",
+      "Needle_Passing_H004",
+      "Needle_Passing_H005",
+      "Needle_Passing_I002",
+      "Needle_Passing_I003",
+      "Needle_Passing_I004",
+      "Needle_Passing_I005"
+    ],
+    "val": [
+      "Needle_Passing_D001",
+      "Needle_Passing_D002",
+      "Needle_Passing_D003",
+      "Needle_Passing_D004",
+      "Needle_Passing_D005"
+    ],
+    "test": [
+      "Needle_Passing_C001",
+      "Needle_Passing_C002",
+      "Needle_Passing_C003",
+      "Needle_Passing_C004",
+      "Needle_Passing_C005"
+    ],
+    "test_surgeon": "C",
+    "val_surgeon": "D",
+    "test_skill": "I",
+    "val_skill": "E"
+  },
+  "fold_3": {
+    "train": [
+      "Needle_Passing_B001",
+      "Needle_Passing_B002",
+      "Needle_Passing_B003",
+      "Needle_Passing_B004",
+      "Needle_Passing_C001",
+      "Needle_Passing_C002",
+      "Needle_Passing_C003",
+      "Needle_Passing_C004",
+      "Needle_Passing_C005",
+      "Needle_Passing_F001",
+      "Needle_Passing_F003",
+      "Needle_Passing_F004",
+      "Needle_Passing_H002",
+      "Needle_Passing_H004",
+      "Needle_Passing_H005",
+      "Needle_Passing_I002",
+      "Needle_Passing_I003",
+      "Needle_Passing_I004",
+      "Needle_Passing_I005"
+    ],
+    "val": [
+      "Needle_Passing_E001",
+      "Needle_Passing_E003",
+      "Needle_Passing_E004",
+      "Needle_Passing_E005"
+    ],
+    "test": [
+      "Needle_Passing_D001",
+      "Needle_Passing_D002",
+      "Needle_Passing_D003",
+      "Needle_Passing_D004",
+      "Needle_Passing_D005"
+    ],
+    "test_surgeon": "D",
+    "val_surgeon": "E",
+    "test_skill": "E",
+    "val_skill": "E"
+  },
+  "fold_4": {
+    "train": [
+      "Needle_Passing_B001",
+      "Needle_Passing_B002",
+      "Needle_Passing_B003",
+      "Needle_Passing_B004",
+      "Needle_Passing_C001",
+      "Needle_Passing_C002",
+      "Needle_Passing_C003",
+      "Needle_Passing_C004",
+      "Needle_Passing_C005",
+      "Needle_Passing_D001",
+      "Needle_Passing_D002",
+      "Needle_Passing_D003",
+      "Needle_Passing_D004",
+      "Needle_Passing_D005",
+      "Needle_Passing_H002",
+      "Needle_Passing_H004",
+      "Needle_Passing_H005",
+      "Needle_Passing_I002",
+      "Needle_Passing_I003",
+      "Needle_Passing_I004",
+      "Needle_Passing_I005"
+    ],
+    "val": [
+      "Needle_Passing_F001",
+      "Needle_Passing_F003",
+      "Needle_Passing_F004"
+    ],
+    "test": [
+      "Needle_Passing_E001",
+      "Needle_Passing_E003",
+      "Needle_Passing_E004",
+      "Needle_Passing_E005"
+    ],
+    "test_surgeon": "E",
+    "val_surgeon": "F",
+    "test_skill": "E",
+    "val_skill": "I"
+  },
+  "fold_5": {
+    "train": [
+      "Needle_Passing_B001",
+      "Needle_Passing_B002",
+      "Needle_Passing_B003",
+      "Needle_Passing_B004",
+      "Needle_Passing_C001",
+      "Needle_Passing_C002",
+      "Needle_Passing_C003",
+      "Needle_Passing_C004",
+      "Needle_Passing_C005",
+      "Needle_Passing_D001",
+      "Needle_Passing_D002",
+      "Needle_Passing_D003",
+      "Needle_Passing_D004",
+      "Needle_Passing_D005",
+      "Needle_Passing_E001",
+      "Needle_Passing_E003",
+      "Needle_Passing_E004",
+      "Needle_Passing_E005",
+      "Needle_Passing_I002",
+      "Needle_Passing_I003",
+      "Needle_Passing_I004",
+      "Needle_Passing_I005"
+    ],
+    "val": [
+      "Needle_Passing_H002",
+      "Needle_Passing_H004",
+      "Needle_Passing_H005"
+    ],
+    "test": [
+      "Needle_Passing_F001",
+      "Needle_Passing_F003",
+      "Needle_Passing_F004"
+    ],
+    "test_surgeon": "F",
+    "val_surgeon": "H",
+    "test_skill": "I",
+    "val_skill": "N"
+  },
+  "fold_6": {
+    "train": [
+      "Needle_Passing_B001",
+      "Needle_Passing_B002",
+      "Needle_Passing_B003",
+      "Needle_Passing_B004",
+      "Needle_Passing_C001",
+      "Needle_Passing_C002",
+      "Needle_Passing_C003",
+      "Needle_Passing_C004",
+      "Needle_Passing_C005",
+      "Needle_Passing_D001",
+      "Needle_Passing_D002",
+      "Needle_Passing_D003",
+      "Needle_Passing_D004",
+      "Needle_Passing_D005",
+      "Needle_Passing_E001",
+      "Needle_Passing_E003",
+      "Needle_Passing_E004",
+      "Needle_Passing_E005",
+      "Needle_Passing_F001",
+      "Needle_Passing_F003",
+      "Needle_Passing_F004"
+    ],
+    "val": [
+      "Needle_Passing_I002",
+      "Needle_Passing_I003",
+      "Needle_Passing_I004",
+      "Needle_Passing_I005"
+    ],
+    "test": [
+      "Needle_Passing_H002",
+      "Needle_Passing_H004",
+      "Needle_Passing_H005"
+    ],
+    "test_surgeon": "H",
+    "val_surgeon": "I",
+    "test_skill": "N",
+    "val_skill": "N"
+  },
+  "fold_7": {
+    "train": [
+      "Needle_Passing_C001",
+      "Needle_Passing_C002",
+      "Needle_Passing_C003",
+      "Needle_Passing_C004",
+      "Needle_Passing_C005",
+      "Needle_Passing_D001",
+      "Needle_Passing_D002",
+      "Needle_Passing_D003",
+      "Needle_Passing_D004",
+      "Needle_Passing_D005",
+      "Needle_Passing_E001",
+      "Needle_Passing_E003",
+      "Needle_Passing_E004",
+      "Needle_Passing_E005",
+      "Needle_Passing_F001",
+      "Needle_Passing_F003",
+      "Needle_Passing_F004",
+      "Needle_Passing_H002",
+      "Needle_Passing_H004",
+      "Needle_Passing_H005"
+    ],
+    "val": [
+      "Needle_Passing_B001",
+      "Needle_Passing_B002",
+      "Needle_Passing_B003",
+      "Needle_Passing_B004"
+    ],
+    "test": [
+      "Needle_Passing_I002",
+      "Needle_Passing_I003",
+      "Needle_Passing_I004",
+      "Needle_Passing_I005"
+    ],
+    "test_surgeon": "I",
+    "val_surgeon": "B",
+    "test_skill": "N",
+    "val_skill": "N"
+  }
+}

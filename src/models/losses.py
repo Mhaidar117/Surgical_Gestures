@@ -58,70 +58,119 @@ def geodesic_distance(R1: torch.Tensor, R2: torch.Tensor) -> torch.Tensor:
     return angle
 
 
+def rotation_9d_to_matrix(rot_9d: torch.Tensor) -> torch.Tensor:
+    """
+    Convert 9D rotation (flattened 3x3 matrix, row-major) to 3x3 rotation matrix.
+
+    Args:
+        rot_9d: Rotation in 9D format of shape (..., 9)
+
+    Returns:
+        Rotation matrices of shape (..., 3, 3)
+    """
+    return rot_9d.view(*rot_9d.shape[:-1], 3, 3)
+
+
 def kinematics_loss(
     pred: torch.Tensor,
     target: torch.Tensor,
-    weights: Optional[Dict[str, float]] = None
+    weights: Optional[Dict[str, float]] = None,
+    kinematics_format: str = '19d'
 ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
     """
     Compute kinematics loss with position, rotation, and gripper components.
-    
+
     Args:
-        pred: Predicted kinematics of shape (B, T, d_out) where d_out >= 10
-              Format: [pos(3), rot6d(6), jaw(1), ...]
+        pred: Predicted kinematics of shape (B, T, d_out)
         target: Target kinematics of same shape
         weights: Optional dictionary with weights for 'pos', 'rot', 'jaw', 'smooth'
-    
+        kinematics_format: '19d' for JIGSAWS raw format or '10d' for converted format
+            - '19d': pos(3) + rot9D(9) + vel_trans(3) + vel_rot(3) + gripper(1)
+            - '10d': pos(3) + rot6D(6) + gripper(1)
+
     Returns:
         Tuple of (total_loss, component_losses_dict)
     """
     if weights is None:
-        weights = {'pos': 1.0, 'rot': 1.0, 'jaw': 1.0, 'smooth': 0.01}
-    
+        # Only supervise gripper/jaw - set other weights to 0
+        weights = {'pos': 0.0, 'rot': 0.0, 'jaw': 1.0, 'smooth': 0.0, 'vel': 0.0}
+
     # Position loss (SmoothL1) - make contiguous for MPS compatibility
     pos_pred = pred[..., :3].contiguous()
     pos_target = target[..., :3].contiguous()
     pos_loss = F.smooth_l1_loss(pos_pred, pos_target, reduction='mean')
-    
-    # Rotation loss (geodesic distance) - make contiguous
-    rot_pred_6d = pred[..., 3:9].contiguous()
-    rot_target_6d = target[..., 3:9].contiguous()
-    
-    rot_pred_mat = rotation_6d_to_matrix(rot_pred_6d)
-    rot_target_mat = rotation_6d_to_matrix(rot_target_6d)
-    
-    rot_loss = geodesic_distance(rot_pred_mat, rot_target_mat).mean()
-    
+
+    if kinematics_format == '19d':
+        # JIGSAWS 19D format: pos(3) + rot9D(9) + vel_trans(3) + vel_rot(3) + gripper(1)
+        # Rotation is 9D flattened matrix at indices 3:12
+        rot_pred_9d = pred[..., 3:12].contiguous()
+        rot_target_9d = target[..., 3:12].contiguous()
+
+        rot_pred_mat = rotation_9d_to_matrix(rot_pred_9d)
+        rot_target_mat = rotation_9d_to_matrix(rot_target_9d)
+
+        rot_loss = geodesic_distance(rot_pred_mat, rot_target_mat).mean()
+
+        # Velocity losses (translational and rotational)
+        vel_trans_pred = pred[..., 12:15].contiguous()
+        vel_trans_target = target[..., 12:15].contiguous()
+        vel_trans_loss = F.mse_loss(vel_trans_pred, vel_trans_target, reduction='mean')
+
+        vel_rot_pred = pred[..., 15:18].contiguous()
+        vel_rot_target = target[..., 15:18].contiguous()
+        vel_rot_loss = F.mse_loss(vel_rot_pred, vel_rot_target, reduction='mean')
+
+        vel_loss = vel_trans_loss + vel_rot_loss
+
+        # Gripper at dimension 18
+        jaw_pred = pred[..., 18:19].contiguous()
+        jaw_target = target[..., 18:19].contiguous()
+        jaw_loss = F.mse_loss(jaw_pred, jaw_target, reduction='mean')
+
+    else:
+        # 10D format: pos(3) + rot6D(6) + gripper(1)
+        rot_pred_6d = pred[..., 3:9].contiguous()
+        rot_target_6d = target[..., 3:9].contiguous()
+
+        rot_pred_mat = rotation_6d_to_matrix(rot_pred_6d)
+        rot_target_mat = rotation_6d_to_matrix(rot_target_6d)
+
+        rot_loss = geodesic_distance(rot_pred_mat, rot_target_mat).mean()
+
+        vel_loss = torch.tensor(0.0, device=pred.device)
+
+        # Gripper at dimension 9
+        if pred.shape[-1] >= 10:
+            jaw_pred = pred[..., 9:10].contiguous()
+            jaw_target = target[..., 9:10].contiguous()
+            jaw_loss = F.mse_loss(jaw_pred, jaw_target, reduction='mean')
+        else:
+            jaw_loss = torch.tensor(0.0, device=pred.device)
+
     # Convert to degrees for reporting
     rot_loss_deg = rot_loss * 180.0 / np.pi
-    
-    # Gripper/jaw loss (MSE) - make contiguous
-    if pred.shape[-1] >= 10:
-        jaw_pred = pred[..., 9:10].contiguous()
-        jaw_target = target[..., 9:10].contiguous()
-        jaw_loss = F.mse_loss(jaw_pred, jaw_target, reduction='mean')
-    else:
-        jaw_loss = torch.tensor(0.0, device=pred.device)
-    
+
     # Smoothness penalty (jerk)
     smooth_penalty = jerk_penalty(pred[..., :3])
-    
+
     # Total loss
     total_loss = (
         weights['pos'] * pos_loss +
         weights['rot'] * rot_loss +
         weights['jaw'] * jaw_loss +
-        weights['smooth'] * smooth_penalty
+        weights['smooth'] * smooth_penalty +
+        weights.get('vel', 0.5) * vel_loss
     )
-    
+
     component_losses = {
         'pos': pos_loss,
         'rot': rot_loss,
         'rot_deg': rot_loss_deg,
         'jaw': jaw_loss,
+        'vel': vel_loss,
         'smooth': smooth_penalty
     }
-    
+
     return total_loss, component_losses
 
 
@@ -322,11 +371,12 @@ def compute_total_loss(
     model_features: Optional[torch.Tensor] = None,
     eeg_patterns: Optional[torch.Tensor] = None,
     brain_mode: str = 'none',
-    loss_weights: Optional[Dict[str, float]] = None
+    loss_weights: Optional[Dict[str, float]] = None,
+    kinematics_format: str = '19d'
 ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
     """
     Compute total loss with all components.
-    
+
     Args:
         pred_kinematics: Predicted kinematics (B, T, D)
         target_kinematics: Target kinematics (B, T, D)
@@ -340,7 +390,8 @@ def compute_total_loss(
         eeg_patterns: EEG patterns for encoding (M, D_eeg)
         brain_mode: 'none', 'rsa', or 'encoding'
         loss_weights: Dictionary with weights for each loss component
-    
+        kinematics_format: '19d' for JIGSAWS raw format or '10d' for converted format
+
     Returns:
         Tuple of (total_loss, component_losses_dict)
     """
@@ -352,11 +403,13 @@ def compute_total_loss(
             'brain': 0.01,
             'control': 0.01
         }
-    
+
     component_losses = {}
-    
+
     # Kinematics loss
-    kin_loss, kin_components = kinematics_loss(pred_kinematics, target_kinematics)
+    kin_loss, kin_components = kinematics_loss(
+        pred_kinematics, target_kinematics, kinematics_format=kinematics_format
+    )
     component_losses['kin'] = kin_loss
     component_losses.update({f'kin_{k}': v for k, v in kin_components.items()})
     

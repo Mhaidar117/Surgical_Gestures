@@ -35,7 +35,8 @@ class JIGSAWSViTDataset(Dataset):
         legacy_blobs_path: Optional[str] = None,
         video_fps: float = 30.0,
         transforms: Optional[callable] = None,
-        cache_dir: Optional[str] = None
+        cache_dir: Optional[str] = None,
+        arm: str = 'PSM2'
     ):
         """
         Args:
@@ -62,6 +63,7 @@ class JIGSAWSViTDataset(Dataset):
         self.use_eeg = use_eeg
         self.video_fps = video_fps
         self.cache_dir = Path(cache_dir) if cache_dir else None
+        self.arm = arm
         
         # Setup paths
         self.task_dir = self.data_root / 'Gestures' / task
@@ -271,6 +273,34 @@ class JIGSAWSViTDataset(Dataset):
         )
         
         return resampled
+    def _extract_arm_kinematics(self, kinematics_76: np.ndarray) -> np.ndarray:
+        """
+        Extract raw kinematics for the specified arm (PSM1 or PSM2).
+
+        JIGSAWS 76-dim format:
+        - Columns 1-38: Master manipulators (MTM Left + MTM Right)
+        - Columns 39-57 (0-indexed 38-56): Slave left (PSM1) - 19 dims
+        - Columns 58-76 (0-indexed 57-75): Slave right (PSM2) - 19 dims
+
+        Each arm's 19 columns:
+        - 0-2: position (x, y, z)
+        - 3-11: rotation matrix (9D, row-major)
+        - 12-14: translational velocity
+        - 15-17: rotational velocity
+        - 18: gripper angle
+
+        Output: raw 19-dim kinematics for the specified arm
+        """
+        if self.arm == 'PSM2':
+            # Extract PSM2 columns (58-76, 0-indexed: 57-76)
+            arm_kinematics = kinematics_76[:, 57:76]  # Shape: (T, 19)
+        elif self.arm == 'PSM1':
+            # Extract PSM1 columns (39-57, 0-indexed: 38-57)
+            arm_kinematics = kinematics_76[:, 38:57]  # Shape: (T, 19)
+        else:
+            raise ValueError(f"Unsupported arm: {self.arm}. Use 'PSM1' or 'PSM2'.")
+
+        return arm_kinematics
     
     def _get_gesture_label(self, gesture: str) -> int:
         """Convert gesture string to label index."""
@@ -340,6 +370,7 @@ class JIGSAWSViTDataset(Dataset):
             
             # Load kinematics
             kin_tensor = self._load_kinematics(sample['kinematics_path'], start_frame, end_frame)
+            kin_tensor = self._extract_arm_kinematics(kin_tensor)
             kin_tensor = torch.from_numpy(kin_tensor).float()
             
             # Sample temporal windows
