@@ -256,6 +256,85 @@ class BrainRDM:
         return best_tau, best_corr
 
 
+def load_eye_rdm(path: str) -> torch.Tensor:
+    """
+    Load the 3x3 eye-tracking task RDM from disk.
+    
+    Args:
+        path: Path to target_rdm_3x3.npy (normalized [0,1] RDM)
+    
+    Returns:
+        RDM tensor of shape (3, 3). Row/col order: Suturing=0, Needle Passing=1, Knot Tying=2.
+    """
+    rdm = np.load(path)
+    return torch.from_numpy(rdm).float()
+
+
+def compute_task_centroid_rdm(
+    embeddings: torch.Tensor,
+    task_labels: torch.Tensor
+) -> torch.Tensor:
+    """
+    Compute 3x3 RDM from task centroids (mean embedding per task).
+    
+    Task label mapping: Suturing=0, Needle Passing=1, Knot Tying=2.
+    Matches row/col order of target_rdm_3x3.npy from eye-tracking exploration.
+    
+    Args:
+        embeddings: Model embeddings of shape (N, D)
+        task_labels: Task labels of shape (N,) with values in {0, 1, 2}
+    
+    Returns:
+        Pairwise Euclidean distance matrix of shape (3, 3)
+    """
+    device = embeddings.device
+    centroids = []
+    for task_id in range(3):
+        mask = (task_labels == task_id)
+        if mask.sum() == 0:
+            # No samples for this task - use zeros (will produce zero distances)
+            centroids.append(torch.zeros(embeddings.shape[-1], device=device))
+        else:
+            centroids.append(embeddings[mask].mean(dim=0))
+    
+    centroids = torch.stack(centroids)  # (3, D)
+    
+    # Pairwise Euclidean distances
+    diff = centroids.unsqueeze(0) - centroids.unsqueeze(1)  # (3, 3, D)
+    rdm = torch.sqrt((diff ** 2).sum(dim=-1) + 1e-8)  # (3, 3)
+    
+    return rdm
+
+
+def eye_rsa_loss(model_rdm: torch.Tensor, target_rdm: torch.Tensor) -> torch.Tensor:
+    """
+    Compute RSA loss: 1 - correlation between model and target RDMs.
+    Uses Pearson correlation (differentiable) for gradient flow through encoder.
+    
+    Args:
+        model_rdm: Model RDM of shape (3, 3)
+        target_rdm: Target eye-tracking RDM of shape (3, 3)
+    
+    Returns:
+        Scalar loss (1 - correlation)
+    """
+    model_flat = flatten_upper_tri(model_rdm)
+    target_flat = flatten_upper_tri(target_rdm)
+    
+    # Pearson correlation (differentiable) for backprop
+    model_centered = model_flat - model_flat.mean()
+    target_centered = target_flat - target_flat.mean()
+    
+    cov = (model_centered * target_centered).sum()
+    std_model = torch.sqrt((model_centered ** 2).sum() + 1e-8)
+    std_target = torch.sqrt((target_centered ** 2).sum() + 1e-8)
+    
+    corr = cov / (std_model * std_target + 1e-8)
+    corr = torch.clamp(corr, -1.0, 1.0)
+    
+    return 1.0 - corr
+
+
 def sample_rdm_batch(
     features: torch.Tensor,
     batch_size: int = 32,

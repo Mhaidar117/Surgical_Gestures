@@ -1,8 +1,9 @@
-# Baseline configuration (no brain alignment)
+# Brain alignment config (eye-tracking task-centroid RSA)
+# Use with: --task all --split fold_1
 model_name: vit_small_patch16_224
 pretrained: true
 freeze_until: 6
-use_adapters: false
+use_adapters: true
 use_flow: false
 
 # Training
@@ -20,20 +21,20 @@ loss_weights:
   kin: 1.0
   gesture: 1.0
   skill: 0.5
-  brain: 0.0
+  brain: 0.01
   control: 0.01
 
-# Brain alignment (disabled) - Stage 1: Warmup
-brain_mode: none
-training_stage: 1
-lambda_brain: 0.0
+# Brain alignment (eye-tracking task-centroid RSA)
+# Stage 2: Brain alignment fine-tune (use adapters)
+brain_mode: eye
+training_stage: 2
+eye_rdm_path: Eye/Exploration/target_rdm_3x3.npy
+brain_layer: mid  # ViT layer for RSA: early, mid, or late
 
 # Decoder
-# 19-dim for single arm: pos(3) + rot(9) + trans_vel(3) + rot_vel(3) + gripper(1)
 d_kin_input: 19
 d_kin_output: 19
 teacher_forcing_decay_epochs: 40
 
 # Other
 save_every: 10
-

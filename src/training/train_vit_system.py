@@ -33,7 +33,13 @@ from models.visual import ViTFrameEncoder
 from models.temporal_transformer import TemporalAggregatorWithPooling
 from models.kinematics import KinematicsModule
 from models.losses import compute_total_loss
-from modules.brain_rdm import BrainRDM, compute_model_rdm, sample_rdm_batch
+from modules.brain_rdm import (
+    BrainRDM,
+    compute_model_rdm,
+    sample_rdm_batch,
+    load_eye_rdm,
+    compute_task_centroid_rdm,
+)
 # Import optim - handle both normal import and importlib loading
 try:
     # Try relative import first (works when imported as package)
@@ -47,7 +53,7 @@ except (ImportError, ValueError):
     spec.loader.exec_module(optim_module)
     get_optimizer = optim_module.get_optimizer
     get_scheduler = optim_module.get_scheduler
-from data import JIGSAWSViTDataset
+from data import JIGSAWSViTDataset, JIGSAWSMultiTaskDataset, BalancedTaskBatchSampler
 from data.split_loader import SplitLoader
 from torch.utils.data import DataLoader, Subset
 
@@ -171,13 +177,16 @@ def train_epoch(
     optimizer: torch.optim.Optimizer,
     device: torch.device,
     config: Dict,
-    epoch: int
+    epoch: int,
+    target_rdm: Optional[torch.Tensor] = None
 ) -> Dict[str, float]:
     """Train for one epoch."""
     model.train()
     total_loss = 0.0
     component_losses = {}
     num_batches = 0
+    brain_mode = config.get('brain_mode', 'none')
+    use_embeddings = brain_mode in ('rsa', 'eye')
     
     # Create progress bar
     pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}", leave=False)
@@ -197,13 +206,14 @@ def train_epoch(
             print(f"  skill_labels: {batch['skill_label'].shape}")
             raise
         
-        # Forward pass
+        # Forward pass (return embeddings when brain alignment is enabled)
         teacher_forcing_prob = max(0.3, 1.0 - (epoch / config.get('teacher_forcing_decay_epochs', 40)))
         
         outputs = model(
             rgb,
             target_kinematics=kinematics,
-            teacher_forcing_prob=teacher_forcing_prob
+            teacher_forcing_prob=teacher_forcing_prob,
+            return_embeddings=use_embeddings
         )
         
         # Compute brain alignment if needed
@@ -212,19 +222,38 @@ def train_epoch(
         model_features = None
         eeg_patterns = None
         
-        if config.get('brain_mode') != 'none' and 'embeddings' in outputs:
-            # Sample features for RDM
+        if brain_mode == 'eye' and target_rdm is not None and 'task_label' in batch:
+            # Task-centroid RSA: use ViT embeddings and task labels
+            emb = None
+            features = outputs.get('embeddings', {})
+            brain_layer = config.get('brain_layer', 'mid')
+            if isinstance(features, dict):
+                emb = features.get(brain_layer)
+                if emb is None:
+                    emb = features.get('mid')
+                if emb is None:
+                    emb = features.get('late')
+                if emb is None:
+                    emb = features.get('early')
+                if emb is None and features:
+                    emb = next(iter(features.values()))
+            if emb is None and 'memory' in outputs:
+                emb = outputs['memory']
+            if emb is not None:
+                B, T, D = emb.shape[0], emb.shape[1], emb.shape[2]
+                embeddings_flat = emb.view(B * T, D)
+                task_labels = batch['task_label'].to(device)
+                task_labels_expanded = task_labels.unsqueeze(1).expand(-1, T).reshape(B * T)
+                model_rdm = compute_task_centroid_rdm(embeddings_flat, task_labels_expanded)
+                eeg_rdm = target_rdm.to(device)
+        elif brain_mode == 'rsa' and 'embeddings' in outputs:
+            # EEG RSA: sample features for RDM
             features = outputs['embeddings'].get('mid', outputs['memory'])
             if len(features.shape) == 3:
                 features = features.view(-1, features.shape[-1])
-            
             sampled_features, _ = sample_rdm_batch(features, batch_size=config.get('rdm_batch_size', 32))
             model_rdm = compute_model_rdm(sampled_features, method='pearson')
-            
-            # Get EEG RDM
-            batch_meta = {
-                'trial_ids': batch.get('trial_id', [])
-            }
+            batch_meta = {'trial_ids': batch.get('trial_id', [])}
             eeg_rdm = model.brain_rdm.get_eeg_rdm(batch_meta, tau=config.get('tau', 0))
         
         # Determine kinematics format based on output dimension
@@ -355,7 +384,8 @@ def main():
     parser = argparse.ArgumentParser(description='Train ViT system')
     parser.add_argument('--config', type=str, required=True, help='Path to config YAML')
     parser.add_argument('--data_root', type=str, required=True, help='Data root directory')
-    parser.add_argument('--task', type=str, default='Knot_Tying', help='Task name')
+    parser.add_argument('--task', type=str, default='Knot_Tying',
+                       help='Task name (Knot_Tying, Needle_Passing, Suturing, or "all" for multi-task brain alignment)')
     parser.add_argument('--output_dir', type=str, default='checkpoints', help='Output directory')
     parser.add_argument('--arm', type=str, default='PSM2', help='Arm to use (PSM1 or PSM2)')
     parser.add_argument('--split', type=str, default=None,
@@ -402,51 +432,110 @@ def main():
     model = model.to(device)
     print("Model moved to device successfully.")
     
+    # Load target RDM for brain alignment (eye mode)
+    target_rdm = None
+    if config.get('brain_mode') == 'eye':
+        eye_rdm_path = config.get('eye_rdm_path', 'Eye/Exploration/target_rdm_3x3.npy')
+        rdm_path = Path(args.data_root) / eye_rdm_path if not Path(eye_rdm_path).is_absolute() else Path(eye_rdm_path)
+        if rdm_path.exists():
+            target_rdm = load_eye_rdm(str(rdm_path))
+            print(f"\nLoaded eye-tracking target RDM from {rdm_path}")
+        else:
+            print(f"\nWARNING: Eye RDM not found at {rdm_path}, brain alignment disabled")
+
     # Create dataset
-    print(f"\nLoading dataset (task: {args.task})...")
-    full_dataset = JIGSAWSViTDataset(
-        data_root=args.data_root,
-        task=args.task,
-        mode='train',
-        arm=args.arm
-    )
-    print(f"  - Full dataset size: {len(full_dataset)} samples")
-
-    # Apply split if specified
-    val_dataloader = None
-    if args.split is not None:
-        print(f"\nApplying LOUO split: {args.split}")
-        split_loader = SplitLoader(args.data_root, args.task, args.split)
-
-        train_trials = split_loader.get_train_trials()
-        val_trials = split_loader.get_val_trials()
-
-        print(f"  - Train trials ({len(train_trials)}): {train_trials}")
-        print(f"  - Val trials ({len(val_trials)}): {val_trials}")
-
-        train_dataset = filter_dataset_by_trials(full_dataset, train_trials)
-        val_dataset = filter_dataset_by_trials(full_dataset, val_trials)
-
+    use_multi_task = args.task.lower() == 'all'
+    if use_multi_task:
+        if args.split is None:
+            raise ValueError("--split is required when --task all (e.g., --split fold_1)")
+        print(f"\nLoading multi-task dataset (all 3 tasks, split: {args.split})...")
+        train_dataset = JIGSAWSMultiTaskDataset(
+            data_root=args.data_root,
+            split_name=args.split,
+            mode='train',
+            arm=args.arm
+        )
+        val_dataset = JIGSAWSMultiTaskDataset(
+            data_root=args.data_root,
+            split_name=args.split,
+            mode='val',
+            arm=args.arm
+        )
         print(f"  - Train samples: {len(train_dataset)}")
         print(f"  - Val samples: {len(val_dataset)}")
 
+        batch_size = config.get('batch_size', 16)
+        if config.get('brain_mode') == 'eye':
+            task_labels = train_dataset.task_labels
+            batch_sampler = BalancedTaskBatchSampler(
+                task_labels=task_labels,
+                batch_size=batch_size,
+                drop_last=False,
+                shuffle=True
+            )
+            train_dataloader = DataLoader(
+                train_dataset,
+                batch_sampler=batch_sampler,
+                num_workers=0
+            )
+        else:
+            train_dataloader = DataLoader(
+                train_dataset,
+                batch_size=batch_size,
+                shuffle=True,
+                num_workers=0
+            )
         val_dataloader = DataLoader(
             val_dataset,
-            batch_size=config.get('batch_size', 16),
+            batch_size=batch_size,
             shuffle=False,
             num_workers=0
         )
     else:
-        print("\n  WARNING: No split specified. Training on ALL data (no validation).")
-        print("  Consider using --split fold_1 for proper train/val separation.")
-        train_dataset = full_dataset
+        print(f"\nLoading dataset (task: {args.task})...")
+        full_dataset = JIGSAWSViTDataset(
+            data_root=args.data_root,
+            task=args.task,
+            mode='train',
+            arm=args.arm
+        )
+        print(f"  - Full dataset size: {len(full_dataset)} samples")
 
-    train_dataloader = DataLoader(
-        train_dataset,
-        batch_size=config.get('batch_size', 16),
-        shuffle=True,
-        num_workers=0  # Set to 0 for MPS compatibility
-    )
+        # Apply split if specified
+        val_dataloader = None
+        if args.split is not None:
+            print(f"\nApplying LOUO split: {args.split}")
+            split_loader = SplitLoader(args.data_root, args.task, args.split)
+
+            train_trials = split_loader.get_train_trials()
+            val_trials = split_loader.get_val_trials()
+
+            print(f"  - Train trials ({len(train_trials)}): {train_trials}")
+            print(f"  - Val trials ({len(val_trials)}): {val_trials}")
+
+            train_dataset = filter_dataset_by_trials(full_dataset, train_trials)
+            val_dataset = filter_dataset_by_trials(full_dataset, val_trials)
+
+            print(f"  - Train samples: {len(train_dataset)}")
+            print(f"  - Val samples: {len(val_dataset)}")
+
+            val_dataloader = DataLoader(
+                val_dataset,
+                batch_size=config.get('batch_size', 16),
+                shuffle=False,
+                num_workers=0
+            )
+        else:
+            print("\n  WARNING: No split specified. Training on ALL data (no validation).")
+            print("  Consider using --split fold_1 for proper train/val separation.")
+            train_dataset = full_dataset
+
+        train_dataloader = DataLoader(
+            train_dataset,
+            batch_size=config.get('batch_size', 16),
+            shuffle=True,
+            num_workers=0  # Set to 0 for MPS compatibility
+        )
     print(f"  - Batch size: {config.get('batch_size', 16)}")
     print(f"  - Number of training batches per epoch: {len(train_dataloader)}")
     
@@ -490,7 +579,10 @@ def main():
 
     for epoch in epoch_pbar:
         # Training
-        train_losses = train_epoch(model, train_dataloader, optimizer, device, config, epoch)
+        train_losses = train_epoch(
+            model, train_dataloader, optimizer, device, config, epoch,
+            target_rdm=target_rdm
+        )
         scheduler.step()
 
         # Validation (if split is specified)
@@ -520,6 +612,9 @@ def main():
             print(f"      - Jaw: {train_losses['kin_jaw']:.6f}")
         print(f"    Gesture Loss: {train_losses.get('gesture', 0):.6f}")
         print(f"    Skill Loss: {train_losses.get('skill', 0):.6f}")
+        if 'brain_rsa' in train_losses:
+            rsa_corr = 1.0 - train_losses['brain_rsa']
+            print(f"    Brain RSA Loss: {train_losses['brain_rsa']:.6f} (corr: {rsa_corr:.4f})")
 
         if val_losses is not None:
             print(f"  [VAL]")

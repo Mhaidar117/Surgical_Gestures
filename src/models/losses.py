@@ -8,6 +8,15 @@ import numpy as np
 from typing import Dict, Optional, Tuple
 from scipy.stats import spearmanr
 
+# Import eye RSA loss for brain_mode='eye' (differentiable Pearson-based)
+try:
+    from modules.brain_rdm import eye_rsa_loss
+except ImportError:
+    try:
+        from ..modules.brain_rdm import eye_rsa_loss
+    except ImportError:
+        eye_rsa_loss = None  # Fallback if module not found
+
 
 def rotation_6d_to_matrix(rot_6d: torch.Tensor) -> torch.Tensor:
     """
@@ -423,7 +432,11 @@ def compute_total_loss(
     
     # Brain alignment loss
     brain_loss = torch.tensor(0.0, device=pred_kinematics.device)
-    if brain_mode == 'rsa' and model_rdm is not None and eeg_rdm is not None:
+    if brain_mode == 'eye' and model_rdm is not None and eeg_rdm is not None and eye_rsa_loss is not None:
+        # Eye-tracking task-centroid RSA (differentiable)
+        brain_loss = eye_rsa_loss(model_rdm, eeg_rdm)
+        component_losses['brain_rsa'] = brain_loss
+    elif brain_mode == 'rsa' and model_rdm is not None and eeg_rdm is not None:
         brain_loss = rsa_loss(model_rdm, eeg_rdm)
         component_losses['brain_rsa'] = brain_loss
     elif brain_mode == 'encoding' and model_features is not None and eeg_patterns is not None:
