@@ -9,6 +9,7 @@
 #   ./run_8fold_louo.sh                    # Run all tasks with all folds
 #   ./run_8fold_louo.sh Knot_Tying         # Run only Knot_Tying
 #   ./run_8fold_louo.sh Knot_Tying 1 3     # Run Knot_Tying folds 1-3 only
+#   ./run_8fold_louo.sh Knot_Tying 1 8 src/configs/custom.yaml  # Custom config
 #
 
 set -e  # Exit on error
@@ -17,7 +18,7 @@ set -e  # Exit on error
 TASK_FILTER=${1:-all}
 START_FOLD=${2:-1}
 END_FOLD=${3:-8}
-CONFIG="src/configs/baseline.yaml"
+CONFIG=${4:-src/configs/baseline.yaml}
 DATA_ROOT="."
 BASE_OUTPUT_DIR="checkpoints"
 EVAL_OUTPUT_DIR="eval_results"

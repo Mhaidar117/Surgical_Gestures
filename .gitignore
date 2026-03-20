@@ -66,3 +66,7 @@ quick_analysis_Knot_Tying_old.png
 Kinematics_pred/
 embeddings/
 .claude/
+
+.DS_Store
+__pycache__/
+*.py[cod]
