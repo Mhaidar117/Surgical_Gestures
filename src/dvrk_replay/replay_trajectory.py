@@ -56,6 +56,18 @@ class JIGSAWReplay:
             self.pos = self.data[:, 57:60]
             self.rot = self.data[:, 60:69]
             self.gripper = self.data[:, 75]
+        elif source_arm == "PSM2_generated":
+            if self.data.shape[1] == 10:
+
+                self.pos = self.data[:, :3]
+                rot_6d = self.data[:, 3:9]
+                self.gripper = self.data[:, 9]
+
+                self.rot = np.array([self.rotation_6d_to_matrix(rot_6d[i]) for i in range(len(rot_6d))])
+            elif self.data.shape[1] == 19:
+                self.pos = self.data[:, 0:3]
+                self.rot = self.data[:, 3:12]
+                self.gripper = self.data[:, 18]
         else:
             raise ValueError(f"Unknown source arm: {source_arm}")
         
