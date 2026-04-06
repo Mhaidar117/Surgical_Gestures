@@ -1,0 +1,37 @@
+# Phase 4 comparison: eye-only baseline (same as brain_eye.yaml).
+# Use: --task all --split fold_1
+#
+# Default JIGSAWS task order for target RDM rows/cols:
+#   Suturing=0, Needle_Passing=1, Knot_Tying=2
+model_name: vit_small_patch16_224
+pretrained: true
+freeze_until: 6
+use_adapters: true
+use_flow: false
+
+batch_size: 16
+num_epochs: 30
+lr_base: 1e-4
+lr_vit: 1e-5
+lr_adapters: 5e-5
+weight_decay: 0.05
+warmup_epochs: 5
+grad_clip: 1.0
+
+loss_weights:
+  kin: 1.0
+  gesture: 1.0
+  skill: 0.5
+  brain: 0.01
+  control: 0.01
+
+brain_mode: eye
+training_stage: 2
+eye_rdm_path: Eye/Exploration/target_rdm_3x3.npy
+brain_layer: mid
+
+d_kin_input: 19
+d_kin_output: 19
+teacher_forcing_decay_epochs: 40
+
+save_every: 10

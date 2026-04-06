@@ -270,40 +270,54 @@ def load_eye_rdm(path: str) -> torch.Tensor:
     return torch.from_numpy(rdm).float()
 
 
+def compute_centroid_rdm(
+    embeddings: torch.Tensor,
+    group_labels: torch.Tensor,
+    num_groups: int,
+) -> torch.Tensor:
+    """
+    Compute K×K RDM from group centroids (mean embedding per group id).
+
+    Args:
+        embeddings: Model embeddings of shape (N, D)
+        group_labels: Group indices of shape (N,) with values in {0, ..., num_groups-1}
+        num_groups: K
+
+    Returns:
+        Pairwise Euclidean distance matrix of shape (K, K)
+    """
+    device = embeddings.device
+    centroids = []
+    for gid in range(num_groups):
+        mask = group_labels == gid
+        if mask.sum() == 0:
+            centroids.append(torch.zeros(embeddings.shape[-1], device=device))
+        else:
+            centroids.append(embeddings[mask].mean(dim=0))
+    centroids = torch.stack(centroids)  # (K, D)
+    diff = centroids.unsqueeze(0) - centroids.unsqueeze(1)  # (K, K, D)
+    rdm = torch.sqrt((diff ** 2).sum(dim=-1) + 1e-8)
+    return rdm
+
+
 def compute_task_centroid_rdm(
     embeddings: torch.Tensor,
     task_labels: torch.Tensor
 ) -> torch.Tensor:
     """
     Compute 3x3 RDM from task centroids (mean embedding per task).
-    
+
     Task label mapping: Suturing=0, Needle Passing=1, Knot Tying=2.
     Matches row/col order of target_rdm_3x3.npy from eye-tracking exploration.
-    
+
     Args:
         embeddings: Model embeddings of shape (N, D)
         task_labels: Task labels of shape (N,) with values in {0, 1, 2}
-    
+
     Returns:
         Pairwise Euclidean distance matrix of shape (3, 3)
     """
-    device = embeddings.device
-    centroids = []
-    for task_id in range(3):
-        mask = (task_labels == task_id)
-        if mask.sum() == 0:
-            # No samples for this task - use zeros (will produce zero distances)
-            centroids.append(torch.zeros(embeddings.shape[-1], device=device))
-        else:
-            centroids.append(embeddings[mask].mean(dim=0))
-    
-    centroids = torch.stack(centroids)  # (3, D)
-    
-    # Pairwise Euclidean distances
-    diff = centroids.unsqueeze(0) - centroids.unsqueeze(1)  # (3, 3, D)
-    rdm = torch.sqrt((diff ** 2).sum(dim=-1) + 1e-8)  # (3, 3)
-    
-    return rdm
+    return compute_centroid_rdm(embeddings, task_labels, num_groups=3)
 
 
 def eye_rsa_loss(model_rdm: torch.Tensor, target_rdm: torch.Tensor) -> torch.Tensor:
@@ -333,6 +347,10 @@ def eye_rsa_loss(model_rdm: torch.Tensor, target_rdm: torch.Tensor) -> torch.Ten
     corr = torch.clamp(corr, -1.0, 1.0)
     
     return 1.0 - corr
+
+
+# Differentiable RSA loss for eye and bridge (coarse) targets — same Pearson upper-tri loss
+bridge_rsa_loss = eye_rsa_loss
 
 
 def sample_rdm_batch(

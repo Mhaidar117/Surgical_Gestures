@@ -5,6 +5,7 @@ Maintains backward compatibility with existing blob format.
 import os
 import pickle
 import json
+import subprocess
 import cv2
 import numpy as np
 import torch
@@ -14,6 +15,10 @@ from pathlib import Path
 
 from .sync_manager import SyncManager
 from .transforms_vit import get_vit_transforms, sample_temporal_windows
+
+# Tracks video paths that have already produced a "can't read" warning so each
+# missing file is reported exactly once across the entire training run.
+_warned_missing_videos: set = set()
 
 
 class JIGSAWSViTDataset(Dataset):
@@ -92,6 +97,11 @@ class JIGSAWSViTDataset(Dataset):
         else:
             # New mode: load from raw data
             self.samples = self._load_samples_from_raw()
+
+        # One-time audit: report unreadable video files at dataset creation so
+        # the count is visible before training starts rather than buried in batch logs.
+        if self.use_rgb:
+            self._audit_video_files()
     
     def _load_metadata(self) -> Dict:
         """Load metadata from meta file."""
@@ -110,6 +120,43 @@ class JIGSAWSViTDataset(Dataset):
                         }
         return metadata
     
+    def _audit_video_files(self) -> None:
+        """Silently probe every unique video path and report unreadable ones once."""
+        unique_paths = {s['video_path'] for s in self.samples if 'video_path' in s}
+        bad = []
+        for vp in sorted(unique_paths):
+            if not os.path.exists(vp):
+                bad.append((vp, 'not found'))
+                continue
+            devnull_fd = os.open(os.devnull, os.O_WRONLY)
+            saved = os.dup(2)
+            os.dup2(devnull_fd, 2)
+            os.close(devnull_fd)
+            try:
+                cap = cv2.VideoCapture(vp)
+                ok = cap.isOpened()
+                cap.release()
+            finally:
+                os.dup2(saved, 2)
+                os.close(saved)
+            if not ok:
+                bad.append((vp, 'unreadable by OpenCV'))
+                _warned_missing_videos.add(vp)
+
+        total = len(unique_paths)
+        n_bad = len(bad)
+        if n_bad:
+            print(f"\n[Dataset audit] {n_bad}/{total} video files cannot be read "
+                  f"({100*n_bad/total:.1f}% of unique paths) — those samples will use "
+                  f"zero frames (kinematics-only).")
+            for path, reason in bad[:10]:
+                print(f"  {reason}: {path}")
+            if n_bad > 10:
+                print(f"  ... and {n_bad - 10} more (suppressed)")
+            print()
+        else:
+            print(f"[Dataset audit] All {total} video files readable.")
+
     def _load_legacy_blobs(self, blobs_path: str) -> List[Dict]:
         """Load samples from legacy blob format."""
         samples = []
@@ -211,25 +258,82 @@ class JIGSAWSViTDataset(Dataset):
         
         return samples
     
-    def _load_video_frames(self, video_path: str, start_frame: int, end_frame: int) -> np.ndarray:
-        """Load RGB frames from video file."""
-        cap = cv2.VideoCapture(video_path)
+    def _load_video_frames_av(self, video_path: str, start_frame: int, end_frame: int) -> np.ndarray:
+        """Decode frames via PyAV (av library) — in-process FFmpeg, no subprocess overhead.
+
+        PyAV wraps libavcodec directly so it handles MPEG4 and every other
+        FFmpeg-supported codec without spawning a new process per call.
+        Install with: pip install av
+        """
+        import av  # local import so the rest of the dataset works if av is absent
         frames = []
-        
-        # Seek to start frame
-        cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
-        
-        for i in range(start_frame, min(end_frame + 1, int(cap.get(cv2.CAP_PROP_FRAME_COUNT)))):
-            ret, frame = cap.read()
-            if ret:
-                # Convert BGR to RGB
-                frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                frames.append(frame)
-            else:
-                break
-        
-        cap.release()
+        try:
+            container = av.open(video_path)
+            stream = container.streams.video[0]
+            # Seek to the keyframe at or before start_frame
+            time_base = stream.time_base
+            fps = float(stream.average_rate) if stream.average_rate else 30.0
+            seek_pts = int(start_frame / fps / float(time_base))
+            container.seek(seek_pts, stream=stream, backward=True, any_frame=False)
+
+            for frame in container.decode(stream):
+                fn = int(frame.pts * float(time_base) * fps + 0.5)
+                if fn < start_frame:
+                    continue
+                if fn > end_frame:
+                    break
+                frames.append(frame.to_ndarray(format='rgb24'))
+            container.close()
+        except Exception:
+            pass
+
         return np.array(frames) if frames else np.zeros((1, 224, 224, 3), dtype=np.uint8)
+
+    def _load_video_frames(self, video_path: str, start_frame: int, end_frame: int) -> np.ndarray:
+        """Load RGB frames from video file.
+
+        Tries cv2 first (fast, zero-copy).  If cv2 cannot open the file —
+        common on macOS where pip-installed opencv lacks MPEG4 codec support —
+        falls back to an ffmpeg subprocess which handles all FFmpeg-supported
+        formats including MPEG4 AVI.  Each unreadable path is warned once.
+        """
+        if not os.path.exists(video_path):
+            if video_path not in _warned_missing_videos:
+                _warned_missing_videos.add(video_path)
+                print(f"Warning: video not found (zero frames): {video_path}")
+            return np.zeros((1, 224, 224, 3), dtype=np.uint8)
+
+        # ── Try cv2 first ──────────────────────────────────────────────────
+        devnull_fd = os.open(os.devnull, os.O_WRONLY)
+        saved_stderr_fd = os.dup(2)
+        os.dup2(devnull_fd, 2)
+        os.close(devnull_fd)
+        try:
+            cap = cv2.VideoCapture(video_path)
+            cv2_ok = cap.isOpened()
+        finally:
+            os.dup2(saved_stderr_fd, 2)
+            os.close(saved_stderr_fd)
+
+        if cv2_ok:
+            frames = []
+            cap.set(cv2.CAP_PROP_POS_FRAMES, start_frame)
+            for _ in range(start_frame, min(end_frame + 1, int(cap.get(cv2.CAP_PROP_FRAME_COUNT)))):
+                ret, frame = cap.read()
+                if ret:
+                    frames.append(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+                else:
+                    break
+            cap.release()
+            return np.array(frames) if frames else np.zeros((1, 224, 224, 3), dtype=np.uint8)
+
+        cap.release()
+
+        # ── Fall back to PyAV (fast, in-process) then subprocess ffmpeg ───
+        if video_path not in _warned_missing_videos:
+            _warned_missing_videos.add(video_path)
+            print(f"Info: cv2 cannot decode '{video_path}' — using PyAV fallback (logged once).")
+        return self._load_video_frames_av(video_path, start_frame, end_frame)
     
     def _load_legacy_blob_data(self, blob_path: str) -> Tuple[torch.Tensor, torch.Tensor]:
         """Load data from legacy blob format."""

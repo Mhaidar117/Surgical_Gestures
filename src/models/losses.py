@@ -397,7 +397,7 @@ def compute_total_loss(
         eeg_rdm: EEG RDM for RSA (M, M)
         model_features: Model features for encoding (M, D)
         eeg_patterns: EEG patterns for encoding (M, D_eeg)
-        brain_mode: 'none', 'rsa', or 'encoding'
+        brain_mode: 'none', 'rsa', 'eye', 'bridge', or 'encoding'
         loss_weights: Dictionary with weights for each loss component
         kinematics_format: '19d' for JIGSAWS raw format or '10d' for converted format
 
@@ -434,6 +434,10 @@ def compute_total_loss(
     brain_loss = torch.tensor(0.0, device=pred_kinematics.device)
     if brain_mode == 'eye' and model_rdm is not None and eeg_rdm is not None and eye_rsa_loss is not None:
         # Eye-tracking task-centroid RSA (differentiable)
+        brain_loss = eye_rsa_loss(model_rdm, eeg_rdm)
+        component_losses['brain_rsa'] = brain_loss
+    elif brain_mode == 'bridge' and model_rdm is not None and eeg_rdm is not None and eye_rsa_loss is not None:
+        # Coarse Phase 3 target RDM vs model centroid R (same differentiable Pearson loss as eye)
         brain_loss = eye_rsa_loss(model_rdm, eeg_rdm)
         component_losses['brain_rsa'] = brain_loss
     elif brain_mode == 'rsa' and model_rdm is not None and eeg_rdm is not None:

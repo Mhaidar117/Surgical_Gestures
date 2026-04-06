@@ -39,6 +39,7 @@ from modules.brain_rdm import (
     sample_rdm_batch,
     load_eye_rdm,
     compute_task_centroid_rdm,
+    compute_centroid_rdm,
 )
 # Import optim - handle both normal import and importlib loading
 try:
@@ -56,6 +57,70 @@ except (ImportError, ValueError):
 from data import JIGSAWSViTDataset, JIGSAWSMultiTaskDataset, BalancedTaskBatchSampler
 from data.split_loader import SplitLoader
 from torch.utils.data import DataLoader, Subset
+import torch.nn.functional as F
+
+
+def pad_collate_fn(batch):
+    """Collate samples with variable-length kinematics (and optionally rgb/flow) by zero-padding.
+
+    Tensors keyed by 'kinematics', 'rgb', and 'flow' may have a variable leading
+    time dimension T across samples in the same batch.  All others are either
+    fixed-size tensors (scalars / feature vectors) or plain Python objects
+    (strings).  Strategy:
+      • Variable-T tensors  → pad to max(T) along dim 0 with zeros.
+      • Fixed-size tensors  → torch.stack as usual.
+      • None entries        → keep as None (whole key collapses to None).
+      • Strings / other     → collect into a list.
+    """
+    # Keys whose first dimension is the time axis and may vary across samples.
+    _variable_len_keys = {'kinematics', 'rgb', 'flow'}
+
+    if not batch:
+        return {}
+
+    keys = batch[0].keys()
+    out = {}
+
+    for key in keys:
+        values = [sample[key] for sample in batch]
+
+        # All None → return None
+        if all(v is None for v in values):
+            out[key] = None
+            continue
+
+        # Mixed None / tensor → replace None with zero tensor matching others
+        non_none = [v for v in values if v is not None]
+        if any(v is None for v in values):
+            ref = non_none[0]
+            values = [v if v is not None else torch.zeros_like(ref) for v in values]
+
+        if not isinstance(values[0], torch.Tensor):
+            # Scalar ints/floats → convert to tensor so downstream code can call .device etc.
+            if isinstance(values[0], (int, float)):
+                out[key] = torch.tensor(values)
+            else:
+                # Strings and other non-numeric types — keep as list
+                out[key] = values
+            continue
+
+        if key in _variable_len_keys:
+            # Pad along dim 0 (time) to the longest sequence in the batch
+            max_t = max(v.shape[0] for v in values)
+            padded = []
+            for v in values:
+                pad_len = max_t - v.shape[0]
+                if pad_len > 0:
+                    # F.pad pads from the last dim; for a 2-D tensor [T, D] we
+                    # need to pad (last_dim_end, last_dim_start, T_end, T_start)
+                    pad_spec = [0, 0] * (v.dim() - 1) + [0, pad_len]
+                    v = F.pad(v, pad_spec)
+                padded.append(v)
+            out[key] = torch.stack(padded, dim=0)
+        else:
+            out[key] = torch.stack(values, dim=0)
+
+    return out
 
 
 class EEGInformedViTModel(nn.Module):
@@ -116,16 +181,23 @@ class EEGInformedViTModel(nn.Module):
         print(f"  - d_kin_input: {d_kin_input}, d_kin_output: {d_kin_output}")
         print(f"  - num_gestures: 15, num_skills: 3")
         
-        # Brain RDM (training only)
+        # Brain RDM (tau / precomputed trial RDMs — only used for brain_mode == rsa)
         self.brain_mode = config.get('brain_mode', 'none')
-        if self.brain_mode != 'none':
+        if self.brain_mode == 'rsa':
             print(f"Creating Brain RDM module (mode: {self.brain_mode})...")
             self.brain_rdm = BrainRDM(
                 cache_dir=config.get('eeg_rdm_cache_dir'),
                 tau_range=config.get('tau_range', [0, 50, 100, 150, 200, 250, 300])
             )
         else:
-            print("Brain RDM: disabled")
+            self.brain_rdm = None
+            if self.brain_mode == 'none':
+                print("Brain RDM: disabled")
+            else:
+                print(
+                    f"Brain RDM module: not instantiated (mode={self.brain_mode}; "
+                    "eye/bridge use fixed target RDMs in train loop)"
+                )
         
         # Count parameters
         total_params = sum(p.numel() for p in self.parameters())
@@ -186,7 +258,7 @@ def train_epoch(
     component_losses = {}
     num_batches = 0
     brain_mode = config.get('brain_mode', 'none')
-    use_embeddings = brain_mode in ('rsa', 'eye')
+    use_embeddings = brain_mode in ('rsa', 'eye', 'bridge')
     
     # Create progress bar
     pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}", leave=False)
@@ -246,7 +318,62 @@ def train_epoch(
                 task_labels_expanded = task_labels.unsqueeze(1).expand(-1, T).reshape(B * T)
                 model_rdm = compute_task_centroid_rdm(embeddings_flat, task_labels_expanded)
                 eeg_rdm = target_rdm.to(device)
-        elif brain_mode == 'rsa' and 'embeddings' in outputs:
+        elif (
+            brain_mode == 'bridge'
+            and target_rdm is not None
+            and config.get('_phase4_bridge') is not None
+            and 'task_label' in batch
+        ):
+            from eeg_eye_bridge.phase4_vit.label_grouping import (
+                expand_group_labels_for_bridge,
+                remap_group_labels,
+            )
+
+            emb = None
+            features = outputs.get('embeddings', {})
+            brain_layer = config.get('brain_layer', 'mid')
+            if isinstance(features, dict):
+                emb = features.get(brain_layer)
+                if emb is None:
+                    emb = features.get('mid')
+                if emb is None:
+                    emb = features.get('late')
+                if emb is None:
+                    emb = features.get('early')
+                if emb is None and features:
+                    emb = next(iter(features.values()))
+            if emb is None and 'memory' in outputs:
+                emb = outputs['memory']
+            if emb is not None:
+                B, T, D = emb.shape[0], emb.shape[1], emb.shape[2]
+                embeddings_flat = emb.view(B * T, D)
+                bridge_meta = config['_phase4_bridge']
+                num_groups = bridge_meta['num_groups']
+                grouping = config.get('bridge_grouping', 'task')
+                gesture_map = config.get('gesture_to_subskill_family')
+                group_labels = expand_group_labels_for_bridge(
+                    batch,
+                    grouping,
+                    T,
+                    gesture_to_subskill_family=gesture_map,
+                ).to(device)
+                order_map = config.get('bridge_unit_label_order')
+                if order_map is not None:
+                    group_labels = remap_group_labels(
+                        group_labels, order_map, num_groups
+                    ).to(device)
+                model_rdm = compute_centroid_rdm(
+                    embeddings_flat, group_labels, num_groups
+                )
+                eeg_rdm = target_rdm.to(device)
+                if model_rdm.shape != eeg_rdm.shape:
+                    print(
+                        f"WARNING: bridge model RDM shape {tuple(model_rdm.shape)} != "
+                        f"target {tuple(eeg_rdm.shape)}; skipping brain term this batch"
+                    )
+                    model_rdm = None
+                    eeg_rdm = None
+        elif brain_mode == 'rsa' and 'embeddings' in outputs and model.brain_rdm is not None:
             # EEG RSA: sample features for RDM
             features = outputs['embeddings'].get('mid', outputs['memory'])
             if len(features.shape) == 3:
@@ -434,6 +561,7 @@ def main():
     
     # Load target RDM for brain alignment (eye mode)
     target_rdm = None
+    config['_phase4_bridge'] = None
     if config.get('brain_mode') == 'eye':
         eye_rdm_path = config.get('eye_rdm_path', 'Eye/Exploration/target_rdm_3x3.npy')
         rdm_path = Path(args.data_root) / eye_rdm_path if not Path(eye_rdm_path).is_absolute() else Path(eye_rdm_path)
@@ -442,6 +570,45 @@ def main():
             print(f"\nLoaded eye-tracking target RDM from {rdm_path}")
         else:
             print(f"\nWARNING: Eye RDM not found at {rdm_path}, brain alignment disabled")
+    elif config.get('brain_mode') == 'bridge':
+        from eeg_eye_bridge.phase4_vit.target_loader import (
+            load_bridge_target_from_manifest,
+            align_bridge_target_to_jigsaws_task_family,
+        )
+
+        bridge_cfg = config.get('bridge') or {}
+        manifest_rel = bridge_cfg.get(
+            'manifest_path', 'cache/eeg_eye_bridge/phase3/rdm_manifest.json'
+        )
+        target_key = bridge_cfg.get('target_key')
+        if not target_key:
+            raise ValueError("bridge.target_key is required when brain_mode is 'bridge'")
+        manifest_path = Path(manifest_rel)
+        if not manifest_path.is_absolute():
+            cand = Path(args.data_root) / manifest_rel
+            manifest_path = cand if cand.is_file() else (Path.cwd() / manifest_rel)
+        manifest_path = manifest_path.resolve()
+        print(f"\nLoading Phase 3 bridge target from manifest: {manifest_path}")
+        bt = load_bridge_target_from_manifest(manifest_path, target_key)
+        if config.get('bridge_grouping', 'task') == 'task' and bt.num_groups == 3:
+            try:
+                bt = align_bridge_target_to_jigsaws_task_family(bt)
+                print("  Aligned target RDM rows/cols to JIGSAWS task order.")
+            except ValueError as e:
+                print(
+                    f"  WARNING: Could not auto-align unit_labels to JIGSAWS task order: {e}"
+                )
+        target_rdm = bt.matrix
+        config['_phase4_bridge'] = {
+            'num_groups': bt.num_groups,
+            'unit_labels': list(bt.unit_labels),
+            'name': bt.name,
+            'rdm_type': bt.rdm_type,
+            'unit_type': bt.unit_type,
+        }
+        print(
+            f"  Bridge target {bt.name!r}: K={bt.num_groups}, unit_type={bt.unit_type!r}"
+        )
 
     # Create dataset
     use_multi_task = args.task.lower() == 'all'
@@ -465,7 +632,11 @@ def main():
         print(f"  - Val samples: {len(val_dataset)}")
 
         batch_size = config.get('batch_size', 16)
-        if config.get('brain_mode') == 'eye':
+        use_balanced_tasks = config.get('brain_mode') == 'eye' or (
+            config.get('brain_mode') == 'bridge'
+            and config.get('bridge_grouping', 'task') == 'task'
+        )
+        if use_balanced_tasks:
             task_labels = train_dataset.task_labels
             batch_sampler = BalancedTaskBatchSampler(
                 task_labels=task_labels,
@@ -476,20 +647,23 @@ def main():
             train_dataloader = DataLoader(
                 train_dataset,
                 batch_sampler=batch_sampler,
-                num_workers=0
+                num_workers=0,
+                collate_fn=pad_collate_fn
             )
         else:
             train_dataloader = DataLoader(
                 train_dataset,
                 batch_size=batch_size,
                 shuffle=True,
-                num_workers=0
+                num_workers=0,
+                collate_fn=pad_collate_fn
             )
         val_dataloader = DataLoader(
             val_dataset,
             batch_size=batch_size,
             shuffle=False,
-            num_workers=0
+            num_workers=0,
+            collate_fn=pad_collate_fn
         )
     else:
         print(f"\nLoading dataset (task: {args.task})...")
@@ -523,7 +697,8 @@ def main():
                 val_dataset,
                 batch_size=config.get('batch_size', 16),
                 shuffle=False,
-                num_workers=0
+                num_workers=0,
+                collate_fn=pad_collate_fn
             )
         else:
             print("\n  WARNING: No split specified. Training on ALL data (no validation).")
@@ -534,7 +709,8 @@ def main():
             train_dataset,
             batch_size=config.get('batch_size', 16),
             shuffle=True,
-            num_workers=0  # Set to 0 for MPS compatibility
+            num_workers=0,  # Set to 0 for MPS compatibility
+            collate_fn=pad_collate_fn
         )
     print(f"  - Batch size: {config.get('batch_size', 16)}")
     print(f"  - Number of training batches per epoch: {len(train_dataloader)}")

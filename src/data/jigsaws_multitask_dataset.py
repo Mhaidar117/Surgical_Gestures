@@ -5,6 +5,7 @@ Combines all 3 tasks (Suturing, Needle Passing, Knot Tying) with task_label for 
 from pathlib import Path
 from typing import Dict, List, Optional
 
+import torch
 from torch.utils.data import Dataset, ConcatDataset, Subset
 
 from .jigsaws_vit_dataset import JIGSAWSViTDataset
@@ -112,6 +113,6 @@ class JIGSAWSMultiTaskDataset(Dataset):
         subset = self.task_datasets[task_idx]
         sample = subset[local_idx]
 
-        # Add task_label for brain alignment
-        sample['task_label'] = self.task_labels[idx]
+        # Add task_label for brain alignment (as tensor, consistent with other labels)
+        sample['task_label'] = torch.tensor(self.task_labels[idx], dtype=torch.long)
         return sample
