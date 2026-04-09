@@ -1,0 +1,46 @@
+# Phase 4: coarse EEG-derived target RDM (Phase 3 artifact), soft regularizer.
+# Requires Phase 3 outputs under cache/eeg_eye_bridge/phase3/ (or set bridge.manifest_path).
+# Use: --task all --split fold_1 --data_root .
+#
+# bridge_grouping:
+#   task — use task_label (0,1,2); balanced batches like eye mode.
+#   subskill — set gesture_to_subskill_family: [15 ints] mapping gesture 0..14 -> family id.
+# bridge_unit_label_order: optional permutation [K ints] to remap model group ids to target order.
+model_name: vit_small_patch16_224
+pretrained: true
+freeze_until: 6
+use_adapters: true
+use_flow: false
+
+batch_size: 128
+num_epochs: 10
+lr_base: 1e-4
+lr_vit: 1e-5
+lr_adapters: 5e-5
+weight_decay: 0.05
+warmup_epochs: 2
+grad_clip: 1.0
+
+loss_weights:
+  kin: 1.0
+  gesture: 1.0
+  skill: 0.5
+  brain: 0.01
+  control: 0.01
+
+brain_mode: bridge
+training_stage: 2
+brain_layer: mid
+
+# Phase 3 manifest (resolved relative to --data_root if not absolute)
+bridge:
+  manifest_path: cache/eeg_eye_bridge/phase3/rdm_manifest.json
+  target_key: eeg_latent_task_family
+
+bridge_grouping: task
+
+d_kin_input: 19
+d_kin_output: 19
+teacher_forcing_decay_epochs: 40
+
+save_every: 10
