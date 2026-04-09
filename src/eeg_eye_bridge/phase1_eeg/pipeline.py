@@ -3,7 +3,8 @@ Run baseline + predictive-coding encoders on windowed EEG (numpy in / numpy out)
 """
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from pathlib import Path
+from typing import Any, Dict, Optional, Tuple
 
 import numpy as np
 import torch
@@ -17,10 +18,14 @@ def run_encoders_on_windows(
     baseline_embed_dim: int = 64,
     pc_hidden_dim: int = 128,
     pc_embed_dim: int = 64,
+    baseline_ckpt: Optional[Path] = None,
+    pc_ckpt: Optional[Path] = None,
 ) -> Dict[str, Any]:
     """
     Args:
         windows: (n_windows, n_channels, n_time) float32
+        baseline_ckpt: optional path to a checkpoint saved by train_eeg_models.py
+        pc_ckpt: optional path to a checkpoint saved by train_eeg_models.py
 
     Returns:
         dict with numpy arrays: baseline_embeddings, pc_embeddings, prediction_errors,
@@ -35,12 +40,19 @@ def run_encoders_on_windows(
         n_time=n_t,
         embed_dim=baseline_embed_dim,
     ).to(dev)
+    if baseline_ckpt is not None:
+        ckpt = torch.load(baseline_ckpt, map_location=dev, weights_only=True)
+        baseline.load_state_dict(ckpt["state_dict"])
+
     pc = PredictiveCodingEEG(
         n_channels=n_c,
         n_time=n_t,
         hidden_dim=pc_hidden_dim,
         embed_dim=pc_embed_dim,
     ).to(dev)
+    if pc_ckpt is not None:
+        ckpt = torch.load(pc_ckpt, map_location=dev, weights_only=True)
+        pc.load_state_dict(ckpt["state_dict"])
 
     b_emb, b_mean = baseline.encode_sequence(wt)
     pc.eval()

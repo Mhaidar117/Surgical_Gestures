@@ -6,7 +6,7 @@ use_adapters: false
 use_flow: false
 
 # Training
-batch_size: 128
+batch_size: 64
 num_epochs: 10
 lr_base: 1e-4
 lr_vit: 1e-5

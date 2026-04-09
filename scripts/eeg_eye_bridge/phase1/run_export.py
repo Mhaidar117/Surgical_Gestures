@@ -55,6 +55,8 @@ def _encode_export_one_trial(
         baseline_embed_dim=args.baseline_embed_dim,
         pc_hidden_dim=args.pc_hidden_dim,
         pc_embed_dim=args.pc_embed_dim,
+        baseline_ckpt=args.baseline_ckpt,
+        pc_ckpt=args.pc_ckpt,
     )
     try:
         export_trial_pickle(
@@ -124,6 +126,18 @@ def parse_args() -> argparse.Namespace:
         "--strict_edf",
         action="store_true",
         help="Abort on first EDF that cannot be loaded (default: skip bad files)",
+    )
+    p.add_argument(
+        "--baseline_ckpt",
+        type=Path,
+        default=None,
+        help="Path to trained baseline CNN checkpoint (from train_eeg_models.py)",
+    )
+    p.add_argument(
+        "--pc_ckpt",
+        type=Path,
+        default=None,
+        help="Path to trained PC model checkpoint (from train_eeg_models.py)",
     )
     return p.parse_args()
 

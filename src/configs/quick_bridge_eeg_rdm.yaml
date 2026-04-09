@@ -12,7 +12,7 @@ freeze_until: 6
 use_adapters: true
 use_flow: false
 
-batch_size: 128
+batch_size: 64
 num_epochs: 10
 lr_base: 1e-4
 lr_vit: 1e-5
