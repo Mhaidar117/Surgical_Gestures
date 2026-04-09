@@ -1,3 +1,7 @@
+# Activate conda environment
+& C:\Users\Windows\miniconda3\shell\condabin\conda-hook.ps1
+conda activate surgical_gestures_venv
+
 $env:PYTHONPATH = "src"
 $tasks = @("Suturing", "Needle_Passing", "Knot_Tying")
 $configs = @(
