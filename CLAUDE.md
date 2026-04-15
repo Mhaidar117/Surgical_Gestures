@@ -1,5 +1,7 @@
 # CLAUDE.md — Project Context for Surgical Gestures
 
+**Repository docs:** Only this file and [`README.md`](README.md) are versioned as project documentation. Optional long-form notes (embedding workflows, legacy README text, Phase 1 schema detail) may live in a local `docs/` directory, which is gitignored.
+
 ## Project Overview
 
 ViT-based surgical gesture recognition and kinematics prediction for the da Vinci Research Kit (dVRK), with a multi-phase **EEG–Eye Bridge** pipeline that derives neuroscientific regularizers from EEG and eye-tracking data. The model watches surgical video and simultaneously predicts robot kinematics, gesture labels, and surgeon skill level.
@@ -36,6 +38,10 @@ python -m pytest tests/eeg_eye_bridge/phase3/test_phase3_rdms.py -v
 python tests/eeg_eye_bridge/phase4/test_phase4_vit_regularizer.py
 python tests/eeg_eye_bridge/test_phase5_integration_coordinator.py
 ```
+
+**Windows (PowerShell)** — same commands with `python` and `$env:PYTHONPATH = "src"` instead of `export`. Use Git Bash or WSL for `./run_8fold_louo.sh` / `./run_8fold_louo_brain.sh`, or invoke `python`/`bash` explicitly.
+
+**Evaluation reports for LOUO aggregation:** [`src/eval/evaluate.py`](src/eval/evaluate.py) accepts optional `--output_dir eval_results` together with `--split fold_N` to write `<Task>_test_fold_<n>_results.txt` files compatible with [`aggregate_louo_results.py`](aggregate_louo_results.py). [`run_8fold_louo.sh`](run_8fold_louo.sh) passes `--output_dir` after each fold’s training.
 
 ## Architecture
 

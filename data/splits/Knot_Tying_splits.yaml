@@ -7,7 +7,6 @@ fold_1:
   test_skill: N
   test_surgeon: B
   train:
-  - ''
   - Knot_Tying_D001
   - Knot_Tying_D002
   - Knot_Tying_D003
@@ -53,7 +52,6 @@ fold_2:
   test_skill: I
   test_surgeon: C
   train:
-  - ''
   - Knot_Tying_B001
   - Knot_Tying_B002
   - Knot_Tying_B003
@@ -98,7 +96,6 @@ fold_3:
   test_skill: E
   test_surgeon: D
   train:
-  - ''
   - Knot_Tying_B001
   - Knot_Tying_B002
   - Knot_Tying_B003
@@ -143,7 +140,6 @@ fold_4:
   test_skill: E
   test_surgeon: E
   train:
-  - ''
   - Knot_Tying_B001
   - Knot_Tying_B002
   - Knot_Tying_B003
@@ -188,7 +184,6 @@ fold_5:
   test_skill: I
   test_surgeon: F
   train:
-  - ''
   - Knot_Tying_B001
   - Knot_Tying_B002
   - Knot_Tying_B003
@@ -233,7 +228,6 @@ fold_6:
   test_skill: N
   test_surgeon: G
   train:
-  - ''
   - Knot_Tying_B001
   - Knot_Tying_B002
   - Knot_Tying_B003
@@ -276,7 +270,6 @@ fold_7:
   test_skill: N
   test_surgeon: H
   train:
-  - ''
   - Knot_Tying_B001
   - Knot_Tying_B002
   - Knot_Tying_B003
@@ -322,10 +315,6 @@ fold_8:
   test_skill: N
   test_surgeon: I
   train:
-  - Knot_Tying_B001
-  - Knot_Tying_B002
-  - Knot_Tying_B003
-  - Knot_Tying_B004
   - Knot_Tying_C001
   - Knot_Tying_C002
   - Knot_Tying_C003
@@ -354,48 +343,6 @@ fold_8:
   - Knot_Tying_H003
   - Knot_Tying_H004
   - Knot_Tying_H005
-  val:
-  - ''
-  val_skill: Unknown
-  val_surgeon: Unknown
-fold_9:
-  test:
-  - ''
-  test_skill: Unknown
-  test_surgeon: Unknown
-  train:
-  - Knot_Tying_C001
-  - Knot_Tying_C002
-  - Knot_Tying_C003
-  - Knot_Tying_C004
-  - Knot_Tying_C005
-  - Knot_Tying_D001
-  - Knot_Tying_D002
-  - Knot_Tying_D003
-  - Knot_Tying_D004
-  - Knot_Tying_D005
-  - Knot_Tying_E001
-  - Knot_Tying_E002
-  - Knot_Tying_E003
-  - Knot_Tying_E004
-  - Knot_Tying_E005
-  - Knot_Tying_F001
-  - Knot_Tying_F002
-  - Knot_Tying_F003
-  - Knot_Tying_F004
-  - Knot_Tying_F005
-  - Knot_Tying_G001
-  - Knot_Tying_G002
-  - Knot_Tying_G003
-  - Knot_Tying_G004
-  - Knot_Tying_G005
-  - Knot_Tying_H003
-  - Knot_Tying_H004
-  - Knot_Tying_H005
-  - Knot_Tying_I001
-  - Knot_Tying_I002
-  - Knot_Tying_I003
-  - Knot_Tying_I005
   val:
   - Knot_Tying_B001
   - Knot_Tying_B002

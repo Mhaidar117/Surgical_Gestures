@@ -1,7 +1,7 @@
 """
 Phase 1: simulator EEG loading, windowing, representation models, and cache export.
 
-Later phases consume artifacts under ``cache/eeg_eye_bridge/phase1/``; see SCHEMA.md.
+Later phases consume artifacts under ``cache/eeg_eye_bridge/phase1/``; see CLAUDE.md (Phase 1).
 """
 
 from .metadata import (

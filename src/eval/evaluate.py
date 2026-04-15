@@ -10,6 +10,7 @@ Usage:
         --mode val \
         --output_dir eval_results
 """
+import re
 import torch
 import torch.nn as nn
 import yaml
@@ -174,6 +175,72 @@ def print_results(results: Dict, mode: str = 'val'):
     print("=" * 60)
 
 
+def save_aggregate_compatible_report(
+    results: Dict,
+    output_dir: Path,
+    task: str,
+    split: Optional[str],
+    mode: str,
+    epoch: int,
+) -> Optional[Path]:
+    """
+    Write metrics in sections understood by aggregate_louo_results.py
+    (Loss Components, Kinematics Metrics, Gesture Metrics, Skill Metrics).
+    """
+    m = re.match(r"fold_(\d+)", split or "")
+    if not m:
+        return None
+    fold_num = int(m.group(1))
+    output_dir.mkdir(parents=True, exist_ok=True)
+    out_path = output_dir / f"{task}_test_fold_{fold_num}_results.txt"
+
+    lines = []
+    lines.append("=" * 60)
+    lines.append(f"Evaluation Results: {task}")
+    lines.append(f"Mode: {mode.upper()}")
+    lines.append(f"Split: {split}")
+    lines.append(f"Checkpoint Epoch: {epoch + 1}")
+    lines.append("=" * 60)
+
+    losses = results["losses"]
+    lines.append("")
+    lines.append("Loss Components")
+    lines.append(f"  Total Loss: {losses.get('total', sum(losses.values())):.6f}")
+    lines.append(f"  Kinematics Loss: {losses.get('kin', 0):.6f}")
+    if "kin_pos" in losses:
+        lines.append(f"  Position: {losses['kin_pos']:.6f}")
+    if "kin_rot" in losses:
+        lines.append(f"  Rotation: {losses['kin_rot']:.6f}")
+    if "kin_jaw" in losses:
+        lines.append(f"  Jaw: {losses['kin_jaw']:.6f}")
+    lines.append(f"  Gesture Loss: {losses.get('gesture', 0):.6f}")
+    lines.append(f"  Skill Loss: {losses.get('skill', 0):.6f}")
+
+    kin = results["kinematics"]
+    lines.append("")
+    lines.append("Kinematics Metrics")
+    lines.append(f"  Position RMSE: {kin['pos_rmse']:.6f}")
+    lines.append(f"  End-Effector Error: {kin['ee_error']:.6f}")
+    lines.append(f"  Rotation RMSE: {kin['rot_rmse']:.6f}")
+
+    gesture = results["gesture"]
+    lines.append("")
+    lines.append("Gesture Metrics")
+    lines.append(f"  Accuracy: {gesture['gesture_accuracy'] * 100:.2f}%")
+    lines.append(f"  F1 Macro: {gesture['gesture_f1_macro']:.4f}")
+    lines.append(f"  F1 Micro: {gesture['gesture_f1_micro']:.4f}")
+
+    skill = results["skill"]
+    lines.append("")
+    lines.append("Skill Metrics")
+    lines.append(f"  Accuracy: {skill['skill_accuracy'] * 100:.2f}%")
+    lines.append(f"  F1 Macro: {skill['skill_f1_macro']:.4f}")
+    lines.append("=" * 60)
+
+    out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return out_path
+
+
 def main():
     parser = argparse.ArgumentParser(description='Evaluate trained model')
     parser.add_argument('--checkpoint', type=str, required=True,
@@ -191,6 +258,9 @@ def main():
                         help='Which set to evaluate on')
     parser.add_argument('--batch_size', type=int, default=16,
                         help='Batch size for evaluation')
+    parser.add_argument('--output_dir', type=str, default=None,
+                        help='If set, write a report file for aggregate_louo_results.py '
+                             '(requires --split fold_N).')
 
     args = parser.parse_args()
 
@@ -261,6 +331,18 @@ def main():
 
     # Print results
     print_results(results, args.mode)
+
+    if args.output_dir and args.split:
+        out = save_aggregate_compatible_report(
+            results,
+            Path(args.output_dir),
+            args.task,
+            args.split,
+            args.mode,
+            epoch,
+        )
+        if out:
+            print(f"\nWrote aggregate-compatible report: {out}")
 
     # Return results for programmatic use
     return results

@@ -7,7 +7,7 @@ use_adapters: true
 use_flow: false
 
 # Training - reduced LR for joint fine-tune
-batch_size: 16
+batch_size: 32
 num_epochs: 10
 lr_base: 5e-5
 lr_vit: 5e-6

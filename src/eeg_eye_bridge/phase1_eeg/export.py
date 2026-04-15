@@ -1,7 +1,7 @@
 """
 Phase 1 cache export: ``manifest.json``, per-trial pickles, ``family_summaries.pkl``.
 
-See SCHEMA.md for the contract consumed by later phases.
+See CLAUDE.md (EEG–Eye Bridge, Phase 1) for the contract consumed by later phases.
 """
 from __future__ import annotations
 

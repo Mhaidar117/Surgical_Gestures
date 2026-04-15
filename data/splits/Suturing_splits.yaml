@@ -8,7 +8,6 @@ fold_1:
   test_skill: N
   test_surgeon: B
   train:
-  - ''
   - Suturing_D001
   - Suturing_D002
   - Suturing_D003
@@ -56,7 +55,6 @@ fold_2:
   test_skill: I
   test_surgeon: C
   train:
-  - ''
   - Suturing_B001
   - Suturing_B002
   - Suturing_B003
@@ -104,7 +102,6 @@ fold_3:
   test_skill: E
   test_surgeon: D
   train:
-  - ''
   - Suturing_B001
   - Suturing_B002
   - Suturing_B003
@@ -152,7 +149,6 @@ fold_4:
   test_skill: E
   test_surgeon: E
   train:
-  - ''
   - Suturing_B001
   - Suturing_B002
   - Suturing_B003
@@ -200,7 +196,6 @@ fold_5:
   test_skill: I
   test_surgeon: F
   train:
-  - ''
   - Suturing_B001
   - Suturing_B002
   - Suturing_B003
@@ -248,7 +243,6 @@ fold_6:
   test_skill: N
   test_surgeon: G
   train:
-  - ''
   - Suturing_B001
   - Suturing_B002
   - Suturing_B003
@@ -295,7 +289,6 @@ fold_7:
   test_skill: N
   test_surgeon: H
   train:
-  - ''
   - Suturing_B001
   - Suturing_B002
   - Suturing_B003
@@ -344,11 +337,6 @@ fold_8:
   test_skill: N
   test_surgeon: I
   train:
-  - Suturing_B001
-  - Suturing_B002
-  - Suturing_B003
-  - Suturing_B004
-  - Suturing_B005
   - Suturing_C001
   - Suturing_C002
   - Suturing_C003
@@ -378,50 +366,6 @@ fold_8:
   - Suturing_H003
   - Suturing_H004
   - Suturing_H005
-  val:
-  - ''
-  val_skill: Unknown
-  val_surgeon: Unknown
-fold_9:
-  test:
-  - ''
-  test_skill: Unknown
-  test_surgeon: Unknown
-  train:
-  - Suturing_C001
-  - Suturing_C002
-  - Suturing_C003
-  - Suturing_C004
-  - Suturing_C005
-  - Suturing_D001
-  - Suturing_D002
-  - Suturing_D003
-  - Suturing_D004
-  - Suturing_D005
-  - Suturing_E001
-  - Suturing_E002
-  - Suturing_E003
-  - Suturing_E004
-  - Suturing_E005
-  - Suturing_F001
-  - Suturing_F002
-  - Suturing_F003
-  - Suturing_F004
-  - Suturing_F005
-  - Suturing_G001
-  - Suturing_G002
-  - Suturing_G003
-  - Suturing_G004
-  - Suturing_G005
-  - Suturing_H001
-  - Suturing_H003
-  - Suturing_H004
-  - Suturing_H005
-  - Suturing_I001
-  - Suturing_I002
-  - Suturing_I003
-  - Suturing_I004
-  - Suturing_I005
   val:
   - Suturing_B001
   - Suturing_B002

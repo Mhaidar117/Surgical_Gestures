@@ -7,6 +7,9 @@ cache/
 checkpoints/
 reports/
 
+# Local documentation (not pushed; only README.md + CLAUDE.md are tracked at root)
+docs/
+
 # Planning docs / prompts
 Prompts/
 Docs/
@@ -32,6 +35,13 @@ logs/
 Kinematics_pred/
 embeddings/
 
+# Evaluation / aggregation outputs (local)
+eval_results/
+louo_summary.txt
+
+# Partial downloads
+*.crdownload
+
 # Python
 __pycache__/
 *.py[cod]
@@ -45,6 +55,7 @@ __pycache__/
 
 # IDE / OS
 .DS_Store
+.cursor/
 .claude/
 node_modules/
 .sass-cache/
