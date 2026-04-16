@@ -35,24 +35,42 @@ def run_encoders_on_windows(
     dev = torch.device(device)
     wt = torch.from_numpy(windows).to(dev, dtype=torch.float32)
 
-    baseline = BaselineEEGTemporalCNN(
-        n_channels=n_c,
-        n_time=n_t,
-        embed_dim=baseline_embed_dim,
-    ).to(dev)
+    # When a checkpoint is provided, rebuild the model from its stored architecture
+    # (which may differ slightly in n_channels due to per-file MNE channel selection)
+    # and truncate the input windows to match.
     if baseline_ckpt is not None:
         ckpt = torch.load(baseline_ckpt, map_location=dev, weights_only=True)
+        baseline = BaselineEEGTemporalCNN(
+            n_channels=ckpt["n_channels"],
+            n_time=ckpt["n_time"],
+            embed_dim=ckpt["embed_dim"],
+        ).to(dev)
         baseline.load_state_dict(ckpt["state_dict"])
+        wt = wt[:, : ckpt["n_channels"], :]
+    else:
+        baseline = BaselineEEGTemporalCNN(
+            n_channels=n_c,
+            n_time=n_t,
+            embed_dim=baseline_embed_dim,
+        ).to(dev)
 
-    pc = PredictiveCodingEEG(
-        n_channels=n_c,
-        n_time=n_t,
-        hidden_dim=pc_hidden_dim,
-        embed_dim=pc_embed_dim,
-    ).to(dev)
     if pc_ckpt is not None:
         ckpt = torch.load(pc_ckpt, map_location=dev, weights_only=True)
+        pc = PredictiveCodingEEG(
+            n_channels=ckpt["n_channels"],
+            n_time=ckpt["n_time"],
+            hidden_dim=ckpt["hidden_dim"],
+            embed_dim=ckpt["embed_dim"],
+        ).to(dev)
         pc.load_state_dict(ckpt["state_dict"])
+        wt = wt[:, : ckpt["n_channels"], :]
+    else:
+        pc = PredictiveCodingEEG(
+            n_channels=n_c,
+            n_time=n_t,
+            hidden_dim=pc_hidden_dim,
+            embed_dim=pc_embed_dim,
+        ).to(dev)
 
     b_emb, b_mean = baseline.encode_sequence(wt)
     pc.eval()

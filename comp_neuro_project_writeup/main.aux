@@ -1,0 +1,61 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyperFirstAtBeginDocument{\AtBeginDocument}
+\HyperFirstAtBeginDocument{\ifx\hyper@anchor\@undefined
+\global\let\oldcontentsline\contentsline
+\gdef\contentsline#1#2#3#4{\oldcontentsline{#1}{#2}{#3}}
+\global\let\oldnewlabel\newlabel
+\gdef\newlabel#1#2{\newlabelxx{#1}#2}
+\gdef\newlabelxx#1#2#3#4#5#6{\oldnewlabel{#1}{{#2}{#3}}}
+\AtEndDocument{\ifx\hyper@anchor\@undefined
+\let\contentsline\oldcontentsline
+\let\newlabel\oldnewlabel
+\fi}
+\fi}
+\global\let\hyper@last\relax 
+\gdef\HyperFirstAtBeginDocument#1{#1}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\citation{shafiei2023eeg}
+\citation{whittington2019theories}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{3}{section.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Results}{3}{section.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}Training Produced a Functional Dissociation Between Latent State and Prediction Error}{3}{subsection.2.1}\protected@file@percent }
+\@writefile{lot}{\contentsline {table}{\numberline {1}{\ignorespaces Eye-state occupancy alignment (Spearman $r$) before and after self-supervised training across $n = 100$ trials. Positive $r$ indicates alignment between the EEG representation and eye-derived HMM state occupancy vectors. \% Positive reports the fraction of trials with $r > 0$.\relax }}{4}{table.caption.1}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{tab:consistency}{{1}{4}{Eye-state occupancy alignment (Spearman $r$) before and after self-supervised training across $n = 100$ trials. Positive $r$ indicates alignment between the EEG representation and eye-derived HMM state occupancy vectors. \% Positive reports the fraction of trials with $r > 0$.\relax }{table.caption.1}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Eye-state occupancy Spearman $r$ (mean $\pm $ SD) for each representation type before (faded bars, random weights) and after (solid bars, self-supervised training) across $n = 100$ trials. Dashed line marks $r = 0$. Training drives the latent representations of both models into anti-correlation, while the prediction error signal moves in the opposite direction.\relax }}{4}{figure.caption.2}\protected@file@percent }
+\newlabel{fig:comparison}{{1}{4}{Eye-state occupancy Spearman $r$ (mean $\pm $ SD) for each representation type before (faded bars, random weights) and after (solid bars, self-supervised training) across $n = 100$ trials. Dashed line marks $r = 0$. Training drives the latent representations of both models into anti-correlation, while the prediction error signal moves in the opposite direction.\relax }{figure.caption.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Per-Trial Distribution of Eye Consistency}{4}{subsection.2.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Per-trial eye-state occupancy Spearman $r$ for trained models across $n = 100$ trials. Violin shapes show the full distribution; horizontal lines mark the median; individual points (jittered) show each trial. The prediction error distribution is the only one centered above zero.\relax }}{5}{figure.caption.3}\protected@file@percent }
+\newlabel{fig:violin}{{2}{5}{Per-trial eye-state occupancy Spearman $r$ for trained models across $n = 100$ trials. Violin shapes show the full distribution; horizontal lines mark the median; individual points (jittered) show each trial. The prediction error distribution is the only one centered above zero.\relax }{figure.caption.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}EEG Latent RDM Reveals Task-Family Structure}{5}{subsection.2.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces Representational Dissimilarity Matrix (RDM) from the trained PC model's latent state, grouped by surgical task family. Entries show pairwise dissimilarity ($1 - \text  {Spearman}\nobreakspace  {}r$). Diagonal entries (self-similarity) are masked. Warmer colors indicate greater dissimilarity. Needle control and camera-and-clutching tasks cluster together; energy-and-dissection tasks are most distinct.\relax }}{6}{figure.caption.4}\protected@file@percent }
+\newlabel{fig:rdm}{{3}{6}{Representational Dissimilarity Matrix (RDM) from the trained PC model's latent state, grouped by surgical task family. Entries show pairwise dissimilarity ($1 - \text {Spearman}~r$). Diagonal entries (self-similarity) are masked. Warmer colors indicate greater dissimilarity. Needle control and camera-and-clutching tasks cluster together; energy-and-dissection tasks are most distinct.\relax }{figure.caption.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.4}RDM Quality Comparison Across Representation Types}{6}{subsection.2.4}\protected@file@percent }
+\citation{whittington2019theories}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces RDM quality scores across all six candidate representations. The EEG latent RDM is the only one with non-zero interpretability, reflecting that eye-only summaries collapsed to maximum pairwise dissimilarity under the current sampling strategy.\relax }}{7}{figure.caption.5}\protected@file@percent }
+\newlabel{fig:rdm_scores}{{4}{7}{RDM quality scores across all six candidate representations. The EEG latent RDM is the only one with non-zero interpretability, reflecting that eye-only summaries collapsed to maximum pairwise dissimilarity under the current sampling strategy.\relax }{figure.caption.5}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {2}{\ignorespaces RDM quality scores for trained models. Combined score is a weighted sum of interpretability, eye-geometry agreement, and transfer plausibility. $\text  {$\mathsurround \z@ \mathchar "458$}$ denotes the representation recommended for downstream transfer.\relax }}{7}{table.caption.6}\protected@file@percent }
+\newlabel{tab:rdm_quality}{{2}{7}{RDM quality scores for trained models. Combined score is a weighted sum of interpretability, eye-geometry agreement, and transfer plausibility. $\checkmark $ denotes the representation recommended for downstream transfer.\relax }{table.caption.6}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {3}Discussion}{7}{section.3}\protected@file@percent }
+\citation{whittington2019theories}
+\@writefile{toc}{\contentsline {section}{\numberline {4}Limitations}{8}{section.4}\protected@file@percent }
+\citation{shafiei2023eeg}
+\citation{gramfort2013meg}
+\@writefile{toc}{\contentsline {section}{\numberline {5}Methods}{9}{section.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Dataset}{9}{subsection.5.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}EEG Preprocessing}{9}{subsection.5.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.3}Models}{10}{subsection.5.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Baseline CNN.}{10}{subsection.5.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {paragraph}{Predictive Coding GRU.}{10}{subsection.5.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.4}Self-Supervised Training}{10}{subsection.5.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.5}Eye-Tracking Processing}{11}{subsection.5.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.6}Eye-Consistency Evaluation}{11}{subsection.5.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.7}Representational Dissimilarity Matrices}{11}{subsection.5.7}\protected@file@percent }
+\bibstyle{plainnat}
+\bibdata{references}
+\bibcite{gramfort2013meg}{{1}{2013}{{Gramfort et~al.}}{{Gramfort, Luessi, Larson, Engemann, Strohmeier, Brodbeck, Goj, Jas, Brooks, Parkkonen, et~al.}}}
+\bibcite{shafiei2023eeg}{{2}{2023}{{Shafiei et~al.}}{{Shafiei, Shadpour, Mohler, Seilanian~Toussi, Doherty, and Jing}}}
+\bibcite{whittington2019theories}{{3}{2019}{{Whittington and Bogacz}}{{}}}
+\gdef \@abspage@last{12}

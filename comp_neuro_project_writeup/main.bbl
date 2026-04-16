@@ -1,0 +1,31 @@
+\begin{thebibliography}{3}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Gramfort et~al.(2013)Gramfort, Luessi, Larson, Engemann, Strohmeier,
+  Brodbeck, Goj, Jas, Brooks, Parkkonen, et~al.]{gramfort2013meg}
+Alexandre Gramfort, Martin Luessi, Eric Larson, Denis~A Engemann, Daniel
+  Strohmeier, Christian Brodbeck, Roman Goj, Mainak Jas, Teon Brooks, Lauri
+  Parkkonen, et~al.
+\newblock {MEG and EEG data analysis with MNE-Python}.
+\newblock \emph{Frontiers in Neuroscience}, 7:\penalty0 267, 2013.
+
+\bibitem[Shafiei et~al.(2023)Shafiei, Shadpour, Mohler, Seilanian~Toussi,
+  Doherty, and Jing]{shafiei2023eeg}
+Saman~B Shafiei, Shahab Shadpour, James Mohler, Maryam Seilanian~Toussi,
+  Patrick Doherty, and Zhijie Jing.
+\newblock {Electroencephalogram and eye-gaze datasets for robot-assisted
+  surgery performance evaluation}.
+\newblock PhysioNet (Version 1.0.0), 2023.
+\newblock \url{https://doi.org/10.13026/qj5m-n649}.
+
+\bibitem[Whittington and Bogacz(2019)]{whittington2019theories}
+James~CR Whittington and Rafal Bogacz.
+\newblock Theories of error back-propagation in the brain.
+\newblock \emph{Trends in Cognitive Sciences}, 23\penalty0 (3):\penalty0
+  235--250, 2019.
+
+\end{thebibliography}

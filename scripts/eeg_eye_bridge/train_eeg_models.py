@@ -258,8 +258,13 @@ def main() -> None:
     if not all_windows:
         sys.exit("No windows loaded — check that EDF files are in EEG/EEG/")
 
-    n_channels = all_windows[0].shape[1]
+    # Some EDF files yield slightly different channel counts after MNE's EEG
+    # channel selection (e.g. 126 vs 128). Truncate all trials to the minimum
+    # so every window batch has a consistent shape.
+    n_channels = min(w.shape[1] for w in all_windows)
     n_time     = all_windows[0].shape[2]
+    all_windows = [w[:, :n_channels, :] for w in all_windows]
+
     n_windows_avg = int(np.mean([w.shape[0] for w in all_windows]))
     print(f"Window shape: {n_channels} channels × {n_time} time steps")
     print(f"Average windows per trial: {n_windows_avg}")
