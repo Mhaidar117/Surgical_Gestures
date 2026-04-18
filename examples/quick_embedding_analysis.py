@@ -60,7 +60,7 @@ def quick_analysis(
     checkpoint = torch.load(checkpoint_path, map_location=device)
     model.load_state_dict(checkpoint['model_state_dict'])
     model.eval()
-    print(f"✓ Model loaded (epoch {checkpoint.get('epoch', '?')})")
+    print(f"- Model loaded (epoch {checkpoint.get('epoch', '?')})")
 
     # Load dataset
     print(f"\nLoading dataset: {task}...")
@@ -76,7 +76,7 @@ def quick_analysis(
     subset = torch.utils.data.Subset(dataset, indices)
 
     dataloader = DataLoader(subset, batch_size=8, shuffle=False, num_workers=0)
-    print(f"✓ Loaded {num_samples} samples")
+    print(f"- Loaded {num_samples} samples")
 
     # Extract embeddings
     print("\nExtracting embeddings...")
@@ -106,7 +106,7 @@ def quick_analysis(
     gesture_labels = np.concatenate(all_gesture_labels, axis=0)  # (N,)
     skill_labels = np.concatenate(all_skill_labels, axis=0)  # (N,)
 
-    print(f"✓ Extracted embeddings: {embeddings.shape}")
+    print(f"- Extracted embeddings: {embeddings.shape}")
     print(f"  - Unique gestures: {len(np.unique(gesture_labels))}")
     print(f"  - Unique skills: {len(np.unique(skill_labels))}")
 
@@ -186,7 +186,7 @@ def quick_analysis(
     # Save figure
     output_path = f'quick_analysis_{task}.png'
     plt.savefig(output_path, dpi=300, bbox_inches='tight')
-    print(f"\n✓ Saved visualization to {output_path}")
+    print(f"\n- Saved visualization to {output_path}")
 
     plt.show()
 

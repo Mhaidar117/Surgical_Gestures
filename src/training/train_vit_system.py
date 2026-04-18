@@ -822,7 +822,7 @@ def main():
                     'task': args.task
                 }
                 torch.save(checkpoint, best_path)
-                print(f"  ★ New best model saved (val_loss: {best_val_loss:.6f})")
+                print(f"  * New best model saved (val_loss: {best_val_loss:.6f})")
 
         print(f"  Learning Rate: {scheduler.get_last_lr()[0]:.6f}")
 
@@ -840,7 +840,7 @@ def main():
                 'task': args.task
             }
             torch.save(checkpoint, checkpoint_path)
-            print(f"  ✓ Checkpoint saved: {checkpoint_path}")
+            print(f"  Checkpoint saved: {checkpoint_path}")
 
     # Save final model
     final_path = output_dir / 'final_model.pth'

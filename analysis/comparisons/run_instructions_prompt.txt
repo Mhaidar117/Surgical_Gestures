@@ -1,0 +1,21 @@
+Use the following prompt in a future session to run the full ablation pipeline:
+
+Run `.\run_ablation_study.ps1 -Conditions brain_eye,bridge_eeg,bridge_joint -RetainCheckpoints none` from the repo root in PowerShell.
+
+Useful variations:
+- Smoke test one fold/task per condition: `.\run_ablation_study.ps1 -Conditions baseline,brain_eye -Tasks Suturing -StartFold 1 -EndFold 1 -RetainCheckpoints none`
+- Keep best checkpoints for debugging: `.\run_ablation_study.ps1 -RetainCheckpoints best`
+- Dry-run the command plan only: `.\run_ablation_study.ps1 -DryRun`
+
+Expected outputs after a successful full run:
+- Per-condition eval files under `eval_results/<condition>/`
+- Per-condition summaries under `analysis/<condition>/louo_summary.txt` and `louo_results.json`
+- Comparison tables and figure CSVs under `analysis/comparisons/`
+- A writeup summary report and this run-instructions prompt file
+
+Do not consider the project ready for writeup until the following exist for every condition:
+- `louo_results.json`
+- `task_metrics.csv`
+- `fold_metrics.csv`
+- comparison CSVs under `analysis/comparisons/`
+- `writeup_summary.txt`

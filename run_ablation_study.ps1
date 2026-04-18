@@ -1,30 +1,480 @@
-# Activate conda environment
-& C:\Users\Windows\miniconda3\shell\condabin\conda-hook.ps1
-conda activate surgical_gestures_venv
-
-$env:PYTHONPATH = "src"
-$tasks = @("Suturing", "Needle_Passing", "Knot_Tying")
-$configs = @(
-    @{name="baseline";      yaml="baseline.yaml"},
-    @{name="brain_eye";     yaml="brain_eye.yaml"},
-    @{name="bridge_eeg";    yaml="bridge_eeg_rdm.yaml"},
-    @{name="bridge_joint";  yaml="bridge_joint_eye_eeg.yaml"}
+param(
+    [string[]]$Tasks = @("Suturing", "Needle_Passing", "Knot_Tying"),
+    [int]$StartFold = 1,
+    [int]$EndFold = 8,
+    [string[]]$Conditions = @("baseline", "brain_eye", "bridge_eeg", "bridge_joint"),
+    [ValidateSet("none", "best", "all")]
+    [string]$RetainCheckpoints = "none",
+    [string]$DataRoot = ".",
+    [string]$CheckpointRoot = "checkpoints",
+    [string]$EvalRoot = "eval_results",
+    [string]$AnalysisRoot = "analysis",
+    [string]$EnvName = "surgical_gestures_venv",
+    [switch]$SkipCondaActivation,
+    [switch]$SkipExport,
+    [switch]$DryRun
 )
 
-foreach ($cfg in $configs) {
-    Write-Host "===== Starting condition: $($cfg.name) =====" -ForegroundColor Green
-    foreach ($task in $tasks) {
-        foreach ($fold in 1..8) {
-            Write-Host "  $($cfg.name) | $task | fold_$fold"
-            python src/training/train_vit_system.py `
-                --config "src/configs/$($cfg.yaml)" `
-                --task $task `
-                --split "fold_$fold" `
-                --data_root . `
-                --output_dir "checkpoints/$($cfg.name)/$task/fold_$fold"
+$ErrorActionPreference = "Stop"
+Set-StrictMode -Version Latest
+
+$repoRoot = $PSScriptRoot
+Set-Location $repoRoot
+$env:PYTHONPATH = "src"
+
+$conditionTable = [ordered]@{
+    baseline     = "src/configs/baseline.yaml"
+    brain_eye    = "src/configs/brain_eye.yaml"
+    bridge_eeg   = "src/configs/bridge_eeg_rdm.yaml"
+    bridge_joint = "src/configs/bridge_joint_eye_eeg.yaml"
+}
+
+function Initialize-CondaEnvironment {
+    param(
+        [string]$TargetEnv,
+        [switch]$SkipActivation
+    )
+
+    if ($SkipActivation) {
+        Write-Host "Skipping conda activation as requested." -ForegroundColor Yellow
+        return
+    }
+
+    $condaCmd = Get-Command conda -ErrorAction SilentlyContinue
+    if ($null -eq $condaCmd) {
+        Write-Warning "Conda was not found on PATH. Continuing without auto-activation."
+        return
+    }
+
+    $hookScript = & $condaCmd.Source "shell.powershell" "hook" | Out-String
+    Invoke-Expression $hookScript
+    conda activate $TargetEnv
+}
+
+function Ensure-Directory {
+    param([string]$Path)
+
+    New-Item -ItemType Directory -Path $Path -Force | Out-Null
+}
+
+function Invoke-LoggedCommand {
+    param(
+        [string]$Label,
+        [string[]]$Command,
+        [string]$LogPath,
+        [switch]$AllowDryRun
+    )
+
+    Ensure-Directory (Split-Path -Parent $LogPath)
+    $rendered = ($Command | ForEach-Object {
+        if ($_ -match "\s") { '"' + $_ + '"' } else { $_ }
+    }) -join " "
+
+    Write-Host ""
+    Write-Host $Label -ForegroundColor Cyan
+    Write-Host $rendered -ForegroundColor DarkGray
+
+    if ($DryRun -and $AllowDryRun) {
+        "[DRY RUN] $rendered" | Tee-Object -FilePath $LogPath | Out-Null
+        return
+    }
+
+    $exe = $Command[0]
+    $args = @()
+    if ($Command.Length -gt 1) {
+        $args = $Command[1..($Command.Length - 1)]
+    }
+
+    $cmdRendered = ($Command | ForEach-Object {
+        if ($_ -match '[\s"]') {
+            '"' + ($_ -replace '"', '\"') + '"'
+        } else {
+            $_
+        }
+    }) -join " "
+
+    cmd /d /c "$cmdRendered 2>&1" | Tee-Object -FilePath $LogPath
+    $exitCode = $LASTEXITCODE
+    if ($exitCode -ne 0) {
+        throw "Command failed: $Label"
+    }
+}
+
+function Cleanup-CheckpointArtifacts {
+    param(
+        [string]$RunDir,
+        [string]$RetentionMode
+    )
+
+    if (-not (Test-Path $RunDir)) {
+        return
+    }
+
+    switch ($RetentionMode) {
+        "all" {
+            return
+        }
+        "best" {
+            Get-ChildItem -Path $RunDir -Filter "*.pth" -File | Where-Object {
+                $_.Name -ne "best_model.pth"
+            } | Remove-Item -Force
+        }
+        "none" {
+            Get-ChildItem -Path $RunDir -Filter "*.pth" -File | Remove-Item -Force
         }
     }
 }
 
-Write-Host "===== All training complete. Aggregating results... =====" -ForegroundColor Green
-python aggregate_louo_results.py
+function Get-LogTail {
+    param(
+        [string]$LogPath,
+        [int]$TailLines = 40
+    )
+
+    if (-not (Test-Path $LogPath)) {
+        return ""
+    }
+
+    return ((Get-Content -Path $LogPath -Tail $TailLines) -join "`n")
+}
+
+function Get-RunStatus {
+    param(
+        [string]$LogPath
+    )
+
+    $logText = Get-LogTail -LogPath $LogPath
+    if ($logText -match "Split fold_\d+ not found") {
+        return "skipped_missing_fold"
+    }
+    if ($logText -match "OutOfMemoryError|CUDA out of memory") {
+        return "failed_oom"
+    }
+    if ($logText -match "No results found in ") {
+        return "skipped_no_results"
+    }
+    return "failed_other"
+}
+
+function Write-StatusArtifacts {
+    param(
+        [string]$ConditionDir,
+        [System.Collections.ArrayList]$Statuses
+    )
+
+    $jsonPath = Join-Path $ConditionDir "run_status.json"
+    $csvPath = Join-Path $ConditionDir "failed_runs.csv"
+
+    $Statuses | ConvertTo-Json -Depth 6 | Set-Content -Path $jsonPath -Encoding utf8
+
+    $failedRows = $Statuses | Where-Object { $_.status -ne "completed" }
+    if ($failedRows.Count -eq 0) {
+        Set-Content -Path $csvPath -Value '"condition","task","fold","stage","status","error_message","log_path"' -Encoding utf8
+        return
+    }
+
+    $failedRows |
+        ForEach-Object { [pscustomobject]$_ } |
+        Select-Object condition, task, fold, stage, status, error_message, log_path |
+        Export-Csv -Path $csvPath -NoTypeInformation -Encoding utf8
+}
+
+function Find-StatusIndex {
+    param(
+        [System.Collections.ArrayList]$Statuses,
+        [string]$Condition,
+        [string]$Task,
+        [string]$Fold,
+        [string]$Stage
+    )
+
+    for ($i = 0; $i -lt $Statuses.Count; $i++) {
+        $row = $Statuses[$i]
+        if ($row.condition -eq $Condition -and $row.task -eq $Task -and $row.fold -eq $Fold -and $row.stage -eq $Stage) {
+            return $i
+        }
+    }
+
+    return -1
+}
+
+function Add-RunStatus {
+    param(
+        [System.Collections.ArrayList]$Statuses,
+        [string]$ConditionDir,
+        [string]$Condition,
+        [string]$Task,
+        [string]$Fold,
+        [string]$Stage,
+        [string]$Status,
+        [string]$ErrorMessage,
+        [string]$LogPath
+    )
+
+    $statusRow = [ordered]@{
+        condition = $Condition
+        task = $Task
+        fold = $Fold
+        stage = $Stage
+        status = $Status
+        error_message = $ErrorMessage
+        log_path = $LogPath
+        timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ssK"
+    }
+
+    $existingIndex = Find-StatusIndex -Statuses $Statuses -Condition $Condition -Task $Task -Fold $Fold -Stage $Stage
+    if ($existingIndex -ge 0) {
+        $Statuses[$existingIndex] = $statusRow
+    } else {
+        [void]$Statuses.Add($statusRow)
+    }
+
+    Write-StatusArtifacts -ConditionDir $ConditionDir -Statuses $Statuses
+}
+
+function Update-OverallProgress {
+    param(
+        [int]$CompletedSteps,
+        [int]$TotalSteps,
+        [string]$CurrentStep,
+        [System.Diagnostics.Stopwatch]$Stopwatch,
+        [switch]$MarkCompleted
+    )
+
+    if ($TotalSteps -le 0) {
+        return
+    }
+
+    $elapsed = $Stopwatch.Elapsed
+    $percent = [Math]::Min(100, [Math]::Floor(($CompletedSteps / $TotalSteps) * 100))
+    $status = "$CompletedSteps / $TotalSteps steps"
+    $etaText = "ETA: calculating..."
+
+    if ($CompletedSteps -gt 0 -and $CompletedSteps -lt $TotalSteps) {
+        $avgSeconds = $elapsed.TotalSeconds / $CompletedSteps
+        $remaining = [TimeSpan]::FromSeconds([Math]::Max(0, ($TotalSteps - $CompletedSteps) * $avgSeconds))
+        $etaText = "ETA: {0:hh\:mm\:ss}" -f $remaining
+    } elseif ($CompletedSteps -ge $TotalSteps) {
+        $etaText = "ETA: 00:00:00"
+    }
+
+    $currentOperation = "{0} | Elapsed: {1:hh\:mm\:ss} | {2}" -f $CurrentStep, $elapsed, $etaText
+
+    if ($MarkCompleted) {
+        Write-Progress -Id 1 -Activity "Full 8-Fold Ablation + Validation" -Status $status -CurrentOperation $currentOperation -Completed
+        return
+    }
+
+    Write-Progress -Id 1 -Activity "Full 8-Fold Ablation + Validation" -Status $status -CurrentOperation $currentOperation -PercentComplete $percent
+}
+
+Initialize-CondaEnvironment -TargetEnv $EnvName -SkipActivation:$SkipCondaActivation
+
+$selectedConditions = @()
+foreach ($condition in $Conditions) {
+    if (-not $conditionTable.Contains($condition)) {
+        throw "Unknown condition '$condition'. Valid options: $($conditionTable.Keys -join ', ')"
+    }
+    $selectedConditions += $condition
+}
+
+if ($StartFold -lt 1 -or $EndFold -lt $StartFold) {
+    throw "Invalid fold range: $StartFold to $EndFold"
+}
+
+$timestamp = Get-Date -Format "yyyy-MM-ddTHH:mm:ssK"
+$pythonExe = "python"
+$foldList = @($StartFold..$EndFold)
+$comparisonRoot = Join-Path $AnalysisRoot "comparisons"
+$stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
+$totalSteps = ($selectedConditions.Count * $Tasks.Count * $foldList.Count * 2) + $selectedConditions.Count
+if (-not $SkipExport) {
+    $totalSteps += 1
+}
+$completedSteps = 0
+
+Ensure-Directory $CheckpointRoot
+Ensure-Directory $EvalRoot
+Ensure-Directory $AnalysisRoot
+Ensure-Directory $comparisonRoot
+
+Write-Host "============================================================" -ForegroundColor Green
+Write-Host "Full 8-Fold Ablation + Validation Runner" -ForegroundColor Green
+Write-Host "============================================================" -ForegroundColor Green
+Write-Host "Tasks: $($Tasks -join ', ')"
+Write-Host "Folds: $StartFold to $EndFold"
+Write-Host "Conditions: $($selectedConditions -join ', ')"
+Write-Host "Retain checkpoints: $RetainCheckpoints"
+Write-Host "Dry run: $DryRun"
+Write-Host "============================================================" -ForegroundColor Green
+
+foreach ($condition in $selectedConditions) {
+    $configPath = $conditionTable[$condition]
+    $conditionAnalysisDir = Join-Path $AnalysisRoot $condition
+    $conditionEvalDir = Join-Path $EvalRoot $condition
+    $conditionLogDir = Join-Path $conditionAnalysisDir "logs"
+    $metadataPath = Join-Path $conditionAnalysisDir "run_metadata.json"
+    $conditionStatuses = [System.Collections.ArrayList]::new()
+
+    Ensure-Directory $conditionAnalysisDir
+    Ensure-Directory $conditionEvalDir
+    Ensure-Directory $conditionLogDir
+
+    $conditionMetadata = [ordered]@{
+        condition = $condition
+        config_path = $configPath
+        tasks = $Tasks
+        folds = $foldList
+        timestamp = $timestamp
+        data_root = $DataRoot
+        checkpoint_root = $CheckpointRoot
+        eval_root = $conditionEvalDir
+        analysis_root = $conditionAnalysisDir
+        retain_checkpoints = $RetainCheckpoints
+        arm = "PSM2"
+        dry_run = [bool]$DryRun
+        runner_script = "run_ablation_study.ps1"
+        train_command_template = "python src/training/train_vit_system.py --config <config> --task <task> --split fold_<N> --data_root <data_root> --output_dir <run_dir> --arm PSM2"
+        eval_command_template = "python src/eval/evaluate.py --checkpoint <run_dir>/best_model.pth --data_root <data_root> --task <task> --split fold_<N> --mode test --output_dir <eval_dir> --arm PSM2"
+    }
+    $conditionMetadata | ConvertTo-Json -Depth 5 | Set-Content -Path $metadataPath -Encoding utf8
+
+    Write-Host ""
+    Write-Host "===== Starting condition: $condition =====" -ForegroundColor Green
+
+    foreach ($task in $Tasks) {
+        foreach ($fold in $foldList) {
+            $split = "fold_$fold"
+            $runDir = Join-Path $CheckpointRoot (Join-Path $condition (Join-Path $task $split))
+            $trainLog = Join-Path $conditionLogDir "${task}_${split}_train.log"
+            $evalLog = Join-Path $conditionLogDir "${task}_${split}_eval.log"
+            $bestCheckpoint = Join-Path $runDir "best_model.pth"
+            $evalReport = Join-Path $conditionEvalDir "${task}_test_fold_${fold}_results.txt"
+
+            Ensure-Directory $runDir
+
+            $trainCmd = @(
+                $pythonExe,
+                "src/training/train_vit_system.py",
+                "--config", $configPath,
+                "--task", $task,
+                "--split", $split,
+                "--data_root", $DataRoot,
+                "--output_dir", $runDir,
+                "--arm", "PSM2"
+            )
+            Update-OverallProgress -CompletedSteps $completedSteps -TotalSteps $totalSteps -CurrentStep "$condition | $task | $split | train" -Stopwatch $stopwatch
+            $trainSucceeded = $false
+            try {
+                Invoke-LoggedCommand -Label "$condition | $task | $split | train" -Command $trainCmd -LogPath $trainLog -AllowDryRun
+                $trainSucceeded = $true
+                Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "train" -Status "completed" -ErrorMessage "" -LogPath $trainLog
+            } catch {
+                $status = Get-RunStatus -LogPath $trainLog
+                $errorMessage = Get-LogTail -LogPath $trainLog -TailLines 20
+                Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "train" -Status $status -ErrorMessage $errorMessage -LogPath $trainLog
+            }
+            $completedSteps += 1
+
+            if (-not $trainSucceeded) {
+                Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "eval" -Status "skipped_upstream_failure" -ErrorMessage "Skipped because training did not complete." -LogPath $evalLog
+                $completedSteps += 1
+                continue
+            }
+
+            if (-not $DryRun -and -not (Test-Path $bestCheckpoint)) {
+                Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "eval" -Status "failed_other" -ErrorMessage "Expected checkpoint not found: $bestCheckpoint" -LogPath $evalLog
+                $completedSteps += 1
+                continue
+            }
+
+            $evalCmd = @(
+                $pythonExe,
+                "src/eval/evaluate.py",
+                "--checkpoint", $bestCheckpoint,
+                "--data_root", $DataRoot,
+                "--task", $task,
+                "--split", $split,
+                "--mode", "test",
+                "--output_dir", $conditionEvalDir,
+                "--arm", "PSM2"
+            )
+            Update-OverallProgress -CompletedSteps $completedSteps -TotalSteps $totalSteps -CurrentStep "$condition | $task | $split | eval" -Stopwatch $stopwatch
+            $evalSucceeded = $false
+            try {
+                Invoke-LoggedCommand -Label "$condition | $task | $split | eval" -Command $evalCmd -LogPath $evalLog -AllowDryRun
+                if (-not $DryRun -and -not (Test-Path $evalReport)) {
+                    throw "Expected evaluation report not found: $evalReport"
+                }
+                $evalSucceeded = $true
+                Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "eval" -Status "completed" -ErrorMessage "" -LogPath $evalLog
+            } catch {
+                $status = Get-RunStatus -LogPath $evalLog
+                $errorMessage = Get-LogTail -LogPath $evalLog -TailLines 20
+                if (-not $errorMessage) {
+                    $errorMessage = $_.Exception.Message
+                }
+                Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "eval" -Status $status -ErrorMessage $errorMessage -LogPath $evalLog
+            }
+            $completedSteps += 1
+
+            if ($evalSucceeded -and -not $DryRun) {
+                Cleanup-CheckpointArtifacts -RunDir $runDir -RetentionMode $RetainCheckpoints
+            }
+        }
+    }
+
+    $summaryPath = Join-Path $conditionAnalysisDir "louo_summary.txt"
+    $jsonPath = Join-Path $conditionAnalysisDir "louo_results.json"
+    $aggregateLog = Join-Path $conditionLogDir "aggregate.log"
+    $aggregateCmd = @(
+        $pythonExe,
+        "aggregate_louo_results.py",
+        "--eval_dir", $conditionEvalDir,
+        "--output", $summaryPath,
+        "--json_output", $jsonPath
+    )
+    Update-OverallProgress -CompletedSteps $completedSteps -TotalSteps $totalSteps -CurrentStep "$condition | aggregate" -Stopwatch $stopwatch
+    try {
+        Invoke-LoggedCommand -Label "$condition | aggregate" -Command $aggregateCmd -LogPath $aggregateLog -AllowDryRun
+        if (-not $DryRun -and -not (Test-Path $jsonPath)) {
+            throw "Expected aggregate JSON not found: $jsonPath"
+        }
+        Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task "*" -Fold "*" -Stage "aggregate" -Status "completed" -ErrorMessage "" -LogPath $aggregateLog
+    } catch {
+        $status = Get-RunStatus -LogPath $aggregateLog
+        $errorMessage = Get-LogTail -LogPath $aggregateLog -TailLines 20
+        if (-not $errorMessage) {
+            $errorMessage = $_.Exception.Message
+        }
+        Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task "*" -Fold "*" -Stage "aggregate" -Status $status -ErrorMessage $errorMessage -LogPath $aggregateLog
+    }
+    $completedSteps += 1
+}
+
+if (-not $SkipExport) {
+    $exportLog = Join-Path $comparisonRoot "export.log"
+    $exportCmd = @(
+        $pythonExe,
+        "scripts/export_ablation_analysis.py",
+        "--analysis_root", $AnalysisRoot,
+        "--eval_root", $EvalRoot,
+        "--runner_script", "run_ablation_study.ps1",
+        "--retain_checkpoints", $RetainCheckpoints,
+        "--conditions"
+    ) + $selectedConditions
+
+    Update-OverallProgress -CompletedSteps $completedSteps -TotalSteps $totalSteps -CurrentStep "comparison export" -Stopwatch $stopwatch
+    Invoke-LoggedCommand -Label "comparison export" -Command $exportCmd -LogPath $exportLog -AllowDryRun
+    $completedSteps += 1
+}
+
+Update-OverallProgress -CompletedSteps $completedSteps -TotalSteps $totalSteps -CurrentStep "complete" -Stopwatch $stopwatch -MarkCompleted
+
+Write-Host ""
+Write-Host "============================================================" -ForegroundColor Green
+Write-Host "Ablation pipeline complete." -ForegroundColor Green
+Write-Host "Analysis root: $AnalysisRoot"
+Write-Host "Eval root: $EvalRoot"
+Write-Host "Checkpoint retention: $RetainCheckpoints"
+Write-Host "============================================================" -ForegroundColor Green

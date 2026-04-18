@@ -62,7 +62,7 @@ for FOLD in $(seq $START_FOLD $END_FOLD); do
             --mode test 2>&1 | tee "$EVAL_OUTPUT_DIR/${TASK}_test_${SPLIT}.txt"
     done
 
-    echo "✓ Completed fold $FOLD"
+    echo "- Completed fold $FOLD"
 done
 
 echo ""

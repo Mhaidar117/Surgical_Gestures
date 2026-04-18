@@ -102,7 +102,7 @@ for TASK in "${TASKS[@]}"; do
             --mode test \
             --output_dir "$EVAL_OUTPUT_DIR"
 
-        echo "✓ Completed $TASK - $SPLIT"
+        echo "- Completed $TASK - $SPLIT"
     done
 
     echo ""

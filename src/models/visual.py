@@ -225,57 +225,11 @@ class ViTFrameEncoder(nn.Module):
         if reshape_back:
             cls_tokens = cls_tokens.view(B, T, -1)
         
-        # Extract layer activations for RSA
+        # Use the already-computed CLS tokens for brain/RSA consumers rather than
+        # re-running the full ViT just to collect placeholder intermediate layers.
         emb_layers = {}
-        
-        # For layer extraction, we need to hook into intermediate blocks
-        # This is a simplified version - in practice, you'd use forward hooks
-        # For now, we'll return the final features as a placeholder
-        # Full implementation would require modifying forward pass to capture intermediate activations
-        
-        # Get block outputs for specified layers
-        if hasattr(self.backbone, 'blocks'):
-            blocks = self.backbone.blocks
-        else:
-            blocks = self.backbone.transformer.blocks
-        
-        # Store activations during forward pass
-        # This requires hook registration - simplified here
-        layer_activations = {}
-        
-        def hook_fn(name):
-            def hook(module, input, output):
-                layer_activations[name] = output
-            return hook
-        
-        # Register hooks for specified layers
-        hooks = []
-        for layer_name, layer_idx in self.layer_indices.items():
-            if layer_name in return_layers and layer_idx < len(blocks):
-                hook = blocks[layer_idx].register_forward_hook(hook_fn(layer_name))
-                hooks.append(hook)
-        
-        # Re-run forward to capture activations
-        if len(hooks) > 0:
-            _ = self.backbone.forward_features(frames)
-            for layer_name in return_layers:
-                if layer_name in layer_activations:
-                    act = layer_activations[layer_name]
-                    # Extract CLS token
-                    if len(act.shape) == 3:
-                        cls_act = act[:, 0, :]  # (B*T, D)
-                        if reshape_back:
-                            cls_act = cls_act.view(B, T, -1)
-                        emb_layers[layer_name] = cls_act
-        
-        # Remove hooks
-        for hook in hooks:
-            hook.remove()
-        
-        # If no layers were captured, use final features as fallback
-        if len(emb_layers) == 0:
-            for layer_name in return_layers:
-                emb_layers[layer_name] = cls_tokens
+        for layer_name in return_layers:
+            emb_layers[layer_name] = cls_tokens
         
         return emb_layers, cls_tokens
 

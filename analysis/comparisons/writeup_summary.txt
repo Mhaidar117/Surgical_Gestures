@@ -1,0 +1,60 @@
+Full 8-fold ablation summary
+============================
+
+Conditions processed: brain_eye, bridge_eeg, bridge_joint
+Checkpoint retention: none
+Analysis root: analysis
+Eval root: eval_results
+
+Task: Knot_Tying
+- Best Gesture Accuracy (%): bridge_eeg (45.3167)
+- Best Gesture F1 Macro: bridge_eeg (0.3979)
+- Best Gesture F1 Micro: bridge_eeg (0.4532)
+- Best Skill Accuracy (%): bridge_joint (55.7200)
+- Best Skill F1 Macro: bridge_joint (0.2665)
+- Best Position RMSE: brain_eye (0.3067)
+- Best End-Effector Error: brain_eye (0.5030)
+- Best Rotation RMSE: bridge_eeg (0.8179)
+- Best Total Loss: bridge_eeg (2.4878)
+- Completed folds: brain_eye=3 folds, bridge_eeg=3 folds, bridge_joint=3 folds
+
+Task: Needle_Passing
+- Best Gesture Accuracy (%): brain_eye (27.5133)
+- Best Gesture F1 Macro: brain_eye (0.1350)
+- Best Gesture F1 Micro: brain_eye (0.2751)
+- Best Skill Accuracy (%): bridge_eeg (1.4933)
+- Best Skill F1 Macro: bridge_eeg (0.0095)
+- Best Position RMSE: bridge_eeg (0.4688)
+- Best End-Effector Error: bridge_eeg (0.7726)
+- Best Rotation RMSE: bridge_joint (0.7309)
+- Best Total Loss: brain_eye (3.0762)
+- Completed folds: brain_eye=3 folds, bridge_eeg=3 folds, bridge_joint=3 folds
+
+Task: Suturing
+- Best Gesture Accuracy (%): bridge_eeg (60.4867)
+- Best Gesture F1 Macro: bridge_eeg (0.4854)
+- Best Gesture F1 Micro: bridge_eeg (0.6049)
+- Best Skill Accuracy (%): brain_eye (27.4500)
+- Best Skill F1 Macro: brain_eye (0.1004)
+- Best Position RMSE: bridge_eeg (0.4640)
+- Best End-Effector Error: bridge_eeg (0.7583)
+- Best Rotation RMSE: brain_eye (0.6437)
+- Best Total Loss: bridge_joint (2.6855)
+- Completed folds: brain_eye=3 folds, bridge_eeg=3 folds, bridge_joint=3 folds
+
+Skipped / failed runs
+---------------------
+brain_eye:
+- Suturing fold_2 [train]: failed_other
+
+bridge_eeg:
+- Suturing fold_2 [train]: failed_other
+
+bridge_joint:
+- Suturing fold_2 [train]: failed_other
+
+Scoped-project caveats
+----------------------
+- cVAE work is intentionally out of scope for this run package.
+- dVRK simulator validation is intentionally deferred.
+- Results should be written up from the exported CSV/TXT artifacts, not from console logs.

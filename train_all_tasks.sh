@@ -63,7 +63,7 @@ for TASK in "${TASKS[@]}"; do
         --arm PSM2
 
     echo ""
-    echo "✓ Completed training for $TASK"
+    echo "- Completed training for $TASK"
     echo "  Best model: $OUTPUT_DIR/best_model.pth"
     echo "  Final model: $OUTPUT_DIR/final_model.pth"
 done

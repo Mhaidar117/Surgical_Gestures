@@ -1,0 +1,24 @@
+﻿{
+    "condition":  "brain_eye",
+    "config_path":  "src/configs/brain_eye.yaml",
+    "tasks":  [
+                  "Suturing",
+                  "Needle_Passing",
+                  "Knot_Tying"
+              ],
+    "folds":  [
+                  2,
+                  3
+              ],
+    "timestamp":  "2026-04-17T14:49:18-07:00",
+    "data_root":  ".",
+    "checkpoint_root":  "checkpoints",
+    "eval_root":  "eval_results\\brain_eye",
+    "analysis_root":  "analysis\\brain_eye",
+    "retain_checkpoints":  "none",
+    "arm":  "PSM2",
+    "dry_run":  false,
+    "runner_script":  "run_ablation_study.ps1",
+    "train_command_template":  "python src/training/train_vit_system.py --config \u003cconfig\u003e --task \u003ctask\u003e --split fold_\u003cN\u003e --data_root \u003cdata_root\u003e --output_dir \u003crun_dir\u003e --arm PSM2",
+    "eval_command_template":  "python src/eval/evaluate.py --checkpoint \u003crun_dir\u003e/best_model.pth --data_root \u003cdata_root\u003e --task \u003ctask\u003e --split fold_\u003cN\u003e --mode test --output_dir \u003ceval_dir\u003e --arm PSM2"
+}

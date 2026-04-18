@@ -60,7 +60,7 @@ for TASK in "${TASKS[@]}"; do
         --output_dir "$EVAL_OUTPUT_DIR"
 
     echo ""
-    echo "✓ Completed evaluation for $TASK"
+    echo "- Completed evaluation for $TASK"
 done
 
 echo ""
