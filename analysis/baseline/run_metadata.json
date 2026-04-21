@@ -5,11 +5,12 @@
                   "Knot_Tying"
               ],
     "folds":  [
-                  1,
-                  2,
-                  3
+                  4,
+                  5,
+                  6,
+                  7
               ],
-    "timestamp":  "2026-04-17T13:20:32-07:00",
+    "timestamp":  "2026-04-19T14:05:32-07:00",
     "data_root":  ".",
     "checkpoint_root":  "checkpoints",
     "eval_root":  "eval_results\\baseline",

@@ -4,7 +4,7 @@ param(
     [int]$EndFold = 8,
     [string[]]$Conditions = @("baseline", "brain_eye", "bridge_eeg", "bridge_joint"),
     [ValidateSet("none", "best", "all")]
-    [string]$RetainCheckpoints = "none",
+    [string]$RetainCheckpoints = "best",
     [string]$DataRoot = ".",
     [string]$CheckpointRoot = "checkpoints",
     [string]$EvalRoot = "eval_results",
@@ -123,6 +123,28 @@ function Cleanup-CheckpointArtifacts {
             Get-ChildItem -Path $RunDir -Filter "*.pth" -File | Remove-Item -Force
         }
     }
+}
+
+function Get-BrainMode {
+    param([string]$ConfigPath)
+
+    if (-not (Test-Path $ConfigPath)) {
+        throw "Config file not found: $ConfigPath"
+    }
+
+    $line = Select-String -Path $ConfigPath -Pattern '^\s*brain_mode\s*:' |
+        Select-Object -First 1
+    if ($null -eq $line) {
+        return "none"
+    }
+
+    $value = ($line.Line -split ':', 2)[1].Trim()
+    $value = ($value -split '#', 2)[0].Trim()
+    $value = $value.Trim("'`"")
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return "none"
+    }
+    return $value
 }
 
 function Get-LogTail {
@@ -287,7 +309,22 @@ $pythonExe = "python"
 $foldList = @($StartFold..$EndFold)
 $comparisonRoot = Join-Path $AnalysisRoot "comparisons"
 $stopwatch = [System.Diagnostics.Stopwatch]::StartNew()
-$totalSteps = ($selectedConditions.Count * $Tasks.Count * $foldList.Count * 2) + $selectedConditions.Count
+
+# Pre-compute per-condition brain_mode and step count:
+# - brain_mode=none (baseline): per-(task,fold) train+eval = tasks * folds * 2 steps
+# - brain_mode in {eye, bridge}: per-fold multi-task train + 3 per-task evals = folds * (1 + tasks)
+$conditionBrainMode = @{}
+$totalSteps = 0
+foreach ($condition in $selectedConditions) {
+    $bm = Get-BrainMode -ConfigPath $conditionTable[$condition]
+    $conditionBrainMode[$condition] = $bm
+    if ($bm -in @('eye','bridge')) {
+        $totalSteps += $foldList.Count * (1 + $Tasks.Count)
+    } else {
+        $totalSteps += $Tasks.Count * $foldList.Count * 2
+    }
+}
+$totalSteps += $selectedConditions.Count  # aggregate step per condition
 if (-not $SkipExport) {
     $totalSteps += 1
 }
@@ -340,16 +377,19 @@ foreach ($condition in $selectedConditions) {
     $conditionMetadata | ConvertTo-Json -Depth 5 | Set-Content -Path $metadataPath -Encoding utf8
 
     Write-Host ""
-    Write-Host "===== Starting condition: $condition =====" -ForegroundColor Green
+    $brainMode = $conditionBrainMode[$condition]
+    $multiTask = $brainMode -in @('eye','bridge')
+    Write-Host "===== Starting condition: $condition (brain_mode=$brainMode, multi_task=$multiTask) =====" -ForegroundColor Green
 
-    foreach ($task in $Tasks) {
+    if ($multiTask) {
+        # Multi-task: one training run per fold using --task all, then 3 per-task evals
+        # from the same checkpoint. Produces per-task fold result files compatible with
+        # aggregate_louo_results.py and manuscript_writer.py.
         foreach ($fold in $foldList) {
             $split = "fold_$fold"
-            $runDir = Join-Path $CheckpointRoot (Join-Path $condition (Join-Path $task $split))
-            $trainLog = Join-Path $conditionLogDir "${task}_${split}_train.log"
-            $evalLog = Join-Path $conditionLogDir "${task}_${split}_eval.log"
+            $runDir = Join-Path $CheckpointRoot (Join-Path $condition (Join-Path 'all' $split))
+            $trainLog = Join-Path $conditionLogDir "all_${split}_train.log"
             $bestCheckpoint = Join-Path $runDir "best_model.pth"
-            $evalReport = Join-Path $conditionEvalDir "${task}_test_fold_${fold}_results.txt"
 
             Ensure-Directory $runDir
 
@@ -357,69 +397,162 @@ foreach ($condition in $selectedConditions) {
                 $pythonExe,
                 "src/training/train_vit_system.py",
                 "--config", $configPath,
-                "--task", $task,
+                "--task", "all",
                 "--split", $split,
                 "--data_root", $DataRoot,
                 "--output_dir", $runDir,
                 "--arm", "PSM2"
             )
-            Update-OverallProgress -CompletedSteps $completedSteps -TotalSteps $totalSteps -CurrentStep "$condition | $task | $split | train" -Stopwatch $stopwatch
+            Update-OverallProgress -CompletedSteps $completedSteps -TotalSteps $totalSteps -CurrentStep "$condition | all | $split | train" -Stopwatch $stopwatch
             $trainSucceeded = $false
             try {
-                Invoke-LoggedCommand -Label "$condition | $task | $split | train" -Command $trainCmd -LogPath $trainLog -AllowDryRun
+                Invoke-LoggedCommand -Label "$condition | all | $split | train" -Command $trainCmd -LogPath $trainLog -AllowDryRun
                 $trainSucceeded = $true
-                Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "train" -Status "completed" -ErrorMessage "" -LogPath $trainLog
+                Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task "all" -Fold $split -Stage "train" -Status "completed" -ErrorMessage "" -LogPath $trainLog
             } catch {
                 $status = Get-RunStatus -LogPath $trainLog
                 $errorMessage = Get-LogTail -LogPath $trainLog -TailLines 20
-                Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "train" -Status $status -ErrorMessage $errorMessage -LogPath $trainLog
+                Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task "all" -Fold $split -Stage "train" -Status $status -ErrorMessage $errorMessage -LogPath $trainLog
             }
             $completedSteps += 1
 
             if (-not $trainSucceeded) {
-                Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "eval" -Status "skipped_upstream_failure" -ErrorMessage "Skipped because training did not complete." -LogPath $evalLog
-                $completedSteps += 1
+                foreach ($task in $Tasks) {
+                    $evalLog = Join-Path $conditionLogDir "${task}_${split}_eval.log"
+                    Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "eval" -Status "skipped_upstream_failure" -ErrorMessage "Skipped because multi-task training did not complete." -LogPath $evalLog
+                    $completedSteps += 1
+                }
                 continue
             }
 
             if (-not $DryRun -and -not (Test-Path $bestCheckpoint)) {
-                Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "eval" -Status "failed_other" -ErrorMessage "Expected checkpoint not found: $bestCheckpoint" -LogPath $evalLog
-                $completedSteps += 1
+                foreach ($task in $Tasks) {
+                    $evalLog = Join-Path $conditionLogDir "${task}_${split}_eval.log"
+                    Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "eval" -Status "failed_other" -ErrorMessage "Expected checkpoint not found: $bestCheckpoint" -LogPath $evalLog
+                    $completedSteps += 1
+                }
                 continue
             }
 
-            $evalCmd = @(
-                $pythonExe,
-                "src/eval/evaluate.py",
-                "--checkpoint", $bestCheckpoint,
-                "--data_root", $DataRoot,
-                "--task", $task,
-                "--split", $split,
-                "--mode", "test",
-                "--output_dir", $conditionEvalDir,
-                "--arm", "PSM2"
-            )
-            Update-OverallProgress -CompletedSteps $completedSteps -TotalSteps $totalSteps -CurrentStep "$condition | $task | $split | eval" -Stopwatch $stopwatch
-            $evalSucceeded = $false
-            try {
-                Invoke-LoggedCommand -Label "$condition | $task | $split | eval" -Command $evalCmd -LogPath $evalLog -AllowDryRun
-                if (-not $DryRun -and -not (Test-Path $evalReport)) {
-                    throw "Expected evaluation report not found: $evalReport"
-                }
-                $evalSucceeded = $true
-                Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "eval" -Status "completed" -ErrorMessage "" -LogPath $evalLog
-            } catch {
-                $status = Get-RunStatus -LogPath $evalLog
-                $errorMessage = Get-LogTail -LogPath $evalLog -TailLines 20
-                if (-not $errorMessage) {
-                    $errorMessage = $_.Exception.Message
-                }
-                Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "eval" -Status $status -ErrorMessage $errorMessage -LogPath $evalLog
-            }
-            $completedSteps += 1
+            $allEvalsSucceeded = $true
+            foreach ($task in $Tasks) {
+                $evalLog = Join-Path $conditionLogDir "${task}_${split}_eval.log"
+                $evalReport = Join-Path $conditionEvalDir "${task}_test_fold_${fold}_results.txt"
 
-            if ($evalSucceeded -and -not $DryRun) {
+                $evalCmd = @(
+                    $pythonExe,
+                    "src/eval/evaluate.py",
+                    "--checkpoint", $bestCheckpoint,
+                    "--data_root", $DataRoot,
+                    "--task", $task,
+                    "--split", $split,
+                    "--mode", "test",
+                    "--output_dir", $conditionEvalDir,
+                    "--arm", "PSM2"
+                )
+                Update-OverallProgress -CompletedSteps $completedSteps -TotalSteps $totalSteps -CurrentStep "$condition | $task | $split | eval" -Stopwatch $stopwatch
+                try {
+                    Invoke-LoggedCommand -Label "$condition | $task | $split | eval" -Command $evalCmd -LogPath $evalLog -AllowDryRun
+                    if (-not $DryRun -and -not (Test-Path $evalReport)) {
+                        throw "Expected evaluation report not found: $evalReport"
+                    }
+                    Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "eval" -Status "completed" -ErrorMessage "" -LogPath $evalLog
+                } catch {
+                    $allEvalsSucceeded = $false
+                    $status = Get-RunStatus -LogPath $evalLog
+                    $errorMessage = Get-LogTail -LogPath $evalLog -TailLines 20
+                    if (-not $errorMessage) {
+                        $errorMessage = $_.Exception.Message
+                    }
+                    Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "eval" -Status $status -ErrorMessage $errorMessage -LogPath $evalLog
+                }
+                $completedSteps += 1
+            }
+
+            if ($allEvalsSucceeded -and -not $DryRun) {
                 Cleanup-CheckpointArtifacts -RunDir $runDir -RetentionMode $RetainCheckpoints
+            }
+        }
+    } else {
+        foreach ($task in $Tasks) {
+            foreach ($fold in $foldList) {
+                $split = "fold_$fold"
+                $runDir = Join-Path $CheckpointRoot (Join-Path $condition (Join-Path $task $split))
+                $trainLog = Join-Path $conditionLogDir "${task}_${split}_train.log"
+                $evalLog = Join-Path $conditionLogDir "${task}_${split}_eval.log"
+                $bestCheckpoint = Join-Path $runDir "best_model.pth"
+                $evalReport = Join-Path $conditionEvalDir "${task}_test_fold_${fold}_results.txt"
+
+                Ensure-Directory $runDir
+
+                $trainCmd = @(
+                    $pythonExe,
+                    "src/training/train_vit_system.py",
+                    "--config", $configPath,
+                    "--task", $task,
+                    "--split", $split,
+                    "--data_root", $DataRoot,
+                    "--output_dir", $runDir,
+                    "--arm", "PSM2"
+                )
+                Update-OverallProgress -CompletedSteps $completedSteps -TotalSteps $totalSteps -CurrentStep "$condition | $task | $split | train" -Stopwatch $stopwatch
+                $trainSucceeded = $false
+                try {
+                    Invoke-LoggedCommand -Label "$condition | $task | $split | train" -Command $trainCmd -LogPath $trainLog -AllowDryRun
+                    $trainSucceeded = $true
+                    Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "train" -Status "completed" -ErrorMessage "" -LogPath $trainLog
+                } catch {
+                    $status = Get-RunStatus -LogPath $trainLog
+                    $errorMessage = Get-LogTail -LogPath $trainLog -TailLines 20
+                    Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "train" -Status $status -ErrorMessage $errorMessage -LogPath $trainLog
+                }
+                $completedSteps += 1
+
+                if (-not $trainSucceeded) {
+                    Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "eval" -Status "skipped_upstream_failure" -ErrorMessage "Skipped because training did not complete." -LogPath $evalLog
+                    $completedSteps += 1
+                    continue
+                }
+
+                if (-not $DryRun -and -not (Test-Path $bestCheckpoint)) {
+                    Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "eval" -Status "failed_other" -ErrorMessage "Expected checkpoint not found: $bestCheckpoint" -LogPath $evalLog
+                    $completedSteps += 1
+                    continue
+                }
+
+                $evalCmd = @(
+                    $pythonExe,
+                    "src/eval/evaluate.py",
+                    "--checkpoint", $bestCheckpoint,
+                    "--data_root", $DataRoot,
+                    "--task", $task,
+                    "--split", $split,
+                    "--mode", "test",
+                    "--output_dir", $conditionEvalDir,
+                    "--arm", "PSM2"
+                )
+                Update-OverallProgress -CompletedSteps $completedSteps -TotalSteps $totalSteps -CurrentStep "$condition | $task | $split | eval" -Stopwatch $stopwatch
+                $evalSucceeded = $false
+                try {
+                    Invoke-LoggedCommand -Label "$condition | $task | $split | eval" -Command $evalCmd -LogPath $evalLog -AllowDryRun
+                    if (-not $DryRun -and -not (Test-Path $evalReport)) {
+                        throw "Expected evaluation report not found: $evalReport"
+                    }
+                    $evalSucceeded = $true
+                    Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "eval" -Status "completed" -ErrorMessage "" -LogPath $evalLog
+                } catch {
+                    $status = Get-RunStatus -LogPath $evalLog
+                    $errorMessage = Get-LogTail -LogPath $evalLog -TailLines 20
+                    if (-not $errorMessage) {
+                        $errorMessage = $_.Exception.Message
+                    }
+                    Add-RunStatus -Statuses $conditionStatuses -ConditionDir $conditionAnalysisDir -Condition $condition -Task $task -Fold $split -Stage "eval" -Status $status -ErrorMessage $errorMessage -LogPath $evalLog
+                }
+                $completedSteps += 1
+
+                if ($evalSucceeded -and -not $DryRun) {
+                    Cleanup-CheckpointArtifacts -RunDir $runDir -RetentionMode $RetainCheckpoints
+                }
             }
         }
     }

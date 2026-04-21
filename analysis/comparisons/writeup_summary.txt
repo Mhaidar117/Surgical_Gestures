@@ -1,57 +1,51 @@
 Full 8-fold ablation summary
 ============================
 
-Conditions processed: brain_eye, bridge_eeg, bridge_joint
+Conditions processed: baseline
 Checkpoint retention: none
 Analysis root: analysis
 Eval root: eval_results
 
 Task: Knot_Tying
-- Best Gesture Accuracy (%): bridge_eeg (45.3167)
-- Best Gesture F1 Macro: bridge_eeg (0.3979)
-- Best Gesture F1 Micro: bridge_eeg (0.4532)
-- Best Skill Accuracy (%): bridge_joint (55.7200)
-- Best Skill F1 Macro: bridge_joint (0.2665)
-- Best Position RMSE: brain_eye (0.3067)
-- Best End-Effector Error: brain_eye (0.5030)
-- Best Rotation RMSE: bridge_eeg (0.8179)
-- Best Total Loss: bridge_eeg (2.4878)
-- Completed folds: brain_eye=3 folds, bridge_eeg=3 folds, bridge_joint=3 folds
+- Best Gesture Accuracy (%): baseline (40.2014)
+- Best Gesture F1 Macro: baseline (0.3203)
+- Best Gesture F1 Micro: baseline (0.4020)
+- Best Skill Accuracy (%): baseline (23.9271)
+- Best Skill F1 Macro: baseline (0.1060)
+- Best Position RMSE: baseline (0.5616)
+- Best End-Effector Error: baseline (0.9501)
+- Best Rotation RMSE: baseline (0.8031)
+- Best Total Loss: baseline (2.5033)
+- Completed folds: baseline=7 folds
 
 Task: Needle_Passing
-- Best Gesture Accuracy (%): brain_eye (27.5133)
-- Best Gesture F1 Macro: brain_eye (0.1350)
-- Best Gesture F1 Micro: brain_eye (0.2751)
-- Best Skill Accuracy (%): bridge_eeg (1.4933)
-- Best Skill F1 Macro: bridge_eeg (0.0095)
-- Best Position RMSE: bridge_eeg (0.4688)
-- Best End-Effector Error: bridge_eeg (0.7726)
-- Best Rotation RMSE: bridge_joint (0.7309)
-- Best Total Loss: brain_eye (3.0762)
-- Completed folds: brain_eye=3 folds, bridge_eeg=3 folds, bridge_joint=3 folds
+- Best Gesture Accuracy (%): baseline (28.1729)
+- Best Gesture F1 Macro: baseline (0.1581)
+- Best Gesture F1 Micro: baseline (0.2817)
+- Best Skill Accuracy (%): baseline (20.0043)
+- Best Skill F1 Macro: baseline (0.1156)
+- Best Position RMSE: baseline (0.5589)
+- Best End-Effector Error: baseline (0.9455)
+- Best Rotation RMSE: baseline (0.8104)
+- Best Total Loss: baseline (3.2382)
+- Completed folds: baseline=7 folds
 
 Task: Suturing
-- Best Gesture Accuracy (%): bridge_eeg (60.4867)
-- Best Gesture F1 Macro: bridge_eeg (0.4854)
-- Best Gesture F1 Micro: bridge_eeg (0.6049)
-- Best Skill Accuracy (%): brain_eye (27.4500)
-- Best Skill F1 Macro: brain_eye (0.1004)
-- Best Position RMSE: bridge_eeg (0.4640)
-- Best End-Effector Error: bridge_eeg (0.7583)
-- Best Rotation RMSE: brain_eye (0.6437)
-- Best Total Loss: bridge_joint (2.6855)
-- Completed folds: brain_eye=3 folds, bridge_eeg=3 folds, bridge_joint=3 folds
+- Best Gesture Accuracy (%): baseline (60.6925)
+- Best Gesture F1 Macro: baseline (0.4157)
+- Best Gesture F1 Micro: baseline (0.6069)
+- Best Skill Accuracy (%): baseline (48.1675)
+- Best Skill F1 Macro: baseline (0.2055)
+- Best Position RMSE: baseline (0.5505)
+- Best End-Effector Error: baseline (0.9346)
+- Best Rotation RMSE: baseline (0.7390)
+- Best Total Loss: baseline (2.2981)
+- Completed folds: baseline=8 folds
 
 Skipped / failed runs
 ---------------------
-brain_eye:
-- Suturing fold_2 [train]: failed_other
-
-bridge_eeg:
-- Suturing fold_2 [train]: failed_other
-
-bridge_joint:
-- Suturing fold_2 [train]: failed_other
+baseline:
+- Knot_Tying fold_4 [train]: failed_other
 
 Scoped-project caveats
 ----------------------

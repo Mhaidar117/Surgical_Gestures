@@ -49,6 +49,7 @@ def build_all_candidate_rdms(
         ("eye_only_task_family", rb.eye_only_task_family),
         ("eye_only_subskill_family", rb.eye_only_subskill_family),
         ("eeg_latent_task_family", rb.eeg_latent_task_family),
+        ("eeg_latent_subskill_family", rb.eeg_latent_subskill_family),
         ("eeg_pred_error_task_family", rb.eeg_pred_error_task_family),
         ("joint_eye_eeg_task_family", rb.joint_eye_eeg_task_family),
         ("joint_eye_eeg_subskill_family", rb.joint_eye_eeg_subskill_family),

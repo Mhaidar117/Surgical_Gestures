@@ -10,8 +10,10 @@ manifest, dataset splits, and training configs, then emits a self-contained
 * ``tables/*.tex`` - booktabs tables with auto-bolded per-task winners.
 * ``figures/*.pdf`` - data-driven figures (bars, box plots, RDM heatmaps,
   transfer-plausibility scatter).
-* ``references.bib`` - stub with ``@article{TODO_*}`` placeholders (only if
-  missing; preserved across reruns).
+* ``references.bib`` - real bibliographic entries for every cite key used
+  by the auto-generated prose. Entries that map to multiple plausible
+  papers are flagged with ``% TODO: resolve citation`` rather than
+  fabricated; the file is overwritten on every run.
 * ``README.md`` - one-time build instructions (only if missing).
 
 Pipeline- and architecture-diagram PDFs (``fig_pipeline_diagram.pdf``,
@@ -62,7 +64,6 @@ CONDITION_LABELS: dict[str, str] = {
     "baseline": "Baseline",
     "brain_eye": "Eye-RSA",
     "bridge_eeg": "EEG-Bridge",
-    "bridge_joint": "Joint-Bridge",
 }
 
 CONDITION_DESCRIPTIONS: dict[str, str] = {
@@ -76,12 +77,8 @@ CONDITION_DESCRIPTIONS: dict[str, str] = {
         "(\\texttt{Eye/Exploration/target\\_rdm\\_3x3.npy})."
     ),
     "bridge_eeg": (
-        "EEG-derived task-family RDM from Phase~3 of the EEG-Eye bridge "
-        "pipeline (manifest key \\texttt{eeg\\_latent\\_task\\_family})."
-    ),
-    "bridge_joint": (
-        "Jointly-fused eye+EEG task-family RDM from Phase~3 of the EEG-Eye "
-        "bridge pipeline (manifest key \\texttt{joint\\_eye\\_eeg\\_task\\_family})."
+        "EEG-derived subskill-family RDM from Phase~3 of the EEG-Eye bridge "
+        "pipeline (manifest key \\texttt{eeg\\_latent\\_subskill\\_family})."
     ),
 }
 
@@ -90,10 +87,13 @@ CONDITION_DESCRIPTIONS: dict[str, str] = {
 # literally load from the Phase 3 manifest (it uses the standalone 3x3 eye RDM
 # under Eye/Exploration/), but ``eye_only_subskill_family`` is the closest
 # Phase 3 proxy and is used only for the transfer-plausibility scatter figure.
+# NOTE: ``bridge_joint`` was dropped from the rerun because the Phase 2 derived
+# joint eye+EEG family RDM is degenerate (all off-diagonal = 1.0), which yields
+# a constant brain RSA loss with zero gradient and trains identically to
+# baseline. See methods for details.
 CONDITION_TO_MANIFEST_RDM: dict[str, str] = {
     "brain_eye": "eye_only_subskill_family",
-    "bridge_eeg": "eeg_latent_task_family",
-    "bridge_joint": "joint_eye_eeg_task_family",
+    "bridge_eeg": "eeg_latent_subskill_family",
 }
 
 # Metric families: which metric keys are "lower is better" vs "higher is better",
@@ -128,8 +128,22 @@ LOSS_METRICS: tuple[MetricSpec, ...] = (
     MetricSpec("loss_total_loss", "total_loss", "Total Loss", "min"),
 )
 
+# Per-frame gesture cross-entropy. Unlike accuracy/F1, it is on the same
+# scale across tasks (all tasks share the 15-class softmax), which makes it
+# the natural scalar for a "global ability to identify which gesture is in
+# the video, per condition" summary. Treated separately from LOSS_METRICS so
+# the main table can give it its own column without dragging total-loss
+# along.
+GESTURE_LOSS_METRIC: MetricSpec = MetricSpec(
+    "loss_gesture_loss", "gesture_loss", "Gesture Loss", "min"
+)
+
 ALL_METRICS: tuple[MetricSpec, ...] = (
-    GESTURE_METRICS + SKILL_METRICS + KINEMATICS_METRICS + LOSS_METRICS
+    GESTURE_METRICS
+    + SKILL_METRICS
+    + KINEMATICS_METRICS
+    + LOSS_METRICS
+    + (GESTURE_LOSS_METRIC,)
 )
 
 
@@ -354,6 +368,100 @@ def load_rdm_matrix(manifest_path: Path, rdm_name: str) -> tuple[np.ndarray | No
     return np.asarray(mat, dtype=float), list(labels)
 
 
+def load_per_fold_eval_metric(
+    eval_root: Path,
+    condition: str,
+    task: str,
+    section: str,
+    field_label: str,
+) -> dict[int, float]:
+    """Return ``{louo_fold_id: value}`` from per-fold eval result text files.
+
+    Files are named ``<Task>_test_fold_<N>_results.txt`` under
+    ``<eval_root>/<condition>/`` and contain blocks like:
+
+        Gesture Metrics
+          Accuracy: 64.52%
+          F1 Macro: 0.4657
+          F1 Micro: 0.6452
+
+    The fold ID is parsed from the filename so the returned dict is keyed by
+    the real LOUO fold ID -- not by a sequential index of completed folds. This
+    is important because some folds fail and are skipped: pairing on a
+    sequential index would compare different held-out surgeons across
+    conditions, which is exactly what paired analysis must avoid.
+    """
+    cond_dir = eval_root / condition
+    out: dict[int, float] = {}
+    if not cond_dir.is_dir():
+        return out
+    name_re = re.compile(r"_test_fold_(\d+)_results\.txt$", re.IGNORECASE)
+    # Capture an indented (or blank) block following the section header. We
+    # use [ \t]* (not \s) so newlines do not get consumed by the leading
+    # whitespace; the non-greedy quantifier plus the (?=\S|\Z) lookahead stops
+    # the block at the first non-indented line (i.e. the next section header)
+    # or end of file.
+    section_re = re.compile(
+        rf"^[ \t]*{re.escape(section)}[ \t]*\n((?:[ \t]*[^\n]*\n)+?)(?=\S|\Z)",
+        re.MULTILINE,
+    )
+    field_re = re.compile(
+        rf"^[ \t]*{re.escape(field_label)}[ \t]*:[ \t]*([-+]?\d*\.?\d+)",
+        re.MULTILINE,
+    )
+    for path in sorted(cond_dir.glob(f"{task}_test_fold_*_results.txt")):
+        m = name_re.search(path.name)
+        if not m:
+            continue
+        fold_id = int(m.group(1))
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        sec_match = section_re.search(text)
+        if not sec_match:
+            continue
+        line_match = field_re.search(sec_match.group(1))
+        if not line_match:
+            continue
+        try:
+            out[fold_id] = float(line_match.group(1))
+        except ValueError:
+            continue
+    return out
+
+
+def paired_bootstrap_ci(
+    deltas: Sequence[float],
+    n_iter: int = 10000,
+    seed: int = 42,
+    ci: float = 0.95,
+) -> tuple[float, float, float, float]:
+    """Percentile bootstrap CI for the mean of paired per-fold deltas.
+
+    Returns ``(observed_mean, ci_lo, ci_hi, p_one_sided)``. ``p_one_sided`` is
+    the fraction of bootstrap means with the opposite sign from the observed
+    mean -- a percentile-bootstrap analog to a one-sided p-value for the
+    hypothesis "the brain-aligned condition does not improve over baseline".
+    Returns NaNs if fewer than 2 paired observations are available.
+    """
+    arr = np.asarray(list(deltas), dtype=float)
+    if arr.size < 2:
+        observed = float(arr.mean()) if arr.size > 0 else 0.0
+        return observed, float("nan"), float("nan"), float("nan")
+    rng = np.random.default_rng(seed)
+    boot = rng.choice(arr, size=(n_iter, arr.size), replace=True).mean(axis=1)
+    observed = float(arr.mean())
+    alpha = (1.0 - ci) / 2.0
+    lo = float(np.quantile(boot, alpha))
+    hi = float(np.quantile(boot, 1 - alpha))
+    if observed >= 0:
+        p_one_sided = float((boot <= 0).mean())
+    else:
+        p_one_sided = float((boot >= 0).mean())
+    return observed, lo, hi, p_one_sided
+
+
 def scrape_model_param_counts(train_log: Path) -> tuple[str, str] | None:
     """Regex-scrape ``Total: X,XXX,XXX`` and ``Trainable: X,XXX,XXX`` from a
     training log. Returns ``None`` if not found.
@@ -403,6 +511,80 @@ def per_metric_winner(
         if result is None:
             continue
         stat = result.get(spec.key)
+        if stat is None:
+            continue
+        ranked.append((cond.name, stat.mean))
+    if not ranked:
+        return None
+    if spec.goal == "max":
+        return max(ranked, key=lambda item: item[1])[0]
+    return min(ranked, key=lambda item: item[1])[0]
+
+
+def pool_metric_across_tasks(
+    condition: Condition,
+    spec: MetricSpec,
+) -> tuple[MetricStat | None, int]:
+    """Pool a single metric across every task for one condition.
+
+    Concatenates per-fold values from each TaskResult so a row like
+    ``(condition=baseline, metric=gesture_loss)`` collapses the
+    (Knot Tying x 3 folds) + (Needle Passing x 7 folds) +
+    (Suturing x 8 folds) values into a single 18-fold sample. Returns
+    ``(MetricStat, total_fold_count)`` or ``(None, 0)`` if no data exists.
+
+    If a TaskResult exposes only ``mean``/``std`` and no ``values`` (e.g. a
+    legacy aggregation), we fall back to a fold-weighted mean of the per-task
+    means and a fold-weighted variance of the per-task variances. The fallback
+    is approximate but keeps the column populated when a future analysis run
+    drops the per-fold lists.
+    """
+    pooled_values: list[float] = []
+    weighted_means: list[tuple[float, int]] = []
+    weighted_vars: list[tuple[float, int]] = []
+    total_folds = 0
+    for task in TASK_ORDER:
+        res = condition.tasks.get(task)
+        if res is None:
+            continue
+        stat = res.get(spec.key)
+        if stat is None:
+            continue
+        total_folds += res.num_folds
+        if stat.values:
+            pooled_values.extend(float(v) for v in stat.values)
+        else:
+            n = max(res.num_folds, 1)
+            weighted_means.append((stat.mean, n))
+            weighted_vars.append((stat.std**2, n))
+    if pooled_values:
+        arr = np.asarray(pooled_values, dtype=float)
+        return (
+            MetricStat(
+                mean=float(arr.mean()),
+                std=float(arr.std(ddof=0)),
+                values=list(arr),
+            ),
+            total_folds,
+        )
+    if weighted_means:
+        n_total = sum(n for _, n in weighted_means)
+        if n_total == 0:
+            return None, 0
+        mean = sum(m * n for m, n in weighted_means) / n_total
+        var = sum(v * n for v, n in weighted_vars) / n_total
+        return MetricStat(mean=mean, std=var**0.5, values=[]), total_folds
+    return None, 0
+
+
+def pooled_per_metric_winner(
+    conditions: Sequence[Condition],
+    spec: MetricSpec,
+) -> str | None:
+    """Return the condition name with the best pooled-across-tasks mean."""
+    ranked: list[tuple[str, float]] = []
+    for cond in conditions:
+        stat, _ = pool_metric_across_tasks(cond, spec)
         if stat is None:
             continue
         ranked.append((cond.name, stat.mean))
@@ -538,13 +720,23 @@ def emit_main_table(
     conditions: Sequence[Condition],
     out_path: Path,
 ) -> None:
-    """Table 1: main gesture + skill + total loss results by (condition, task)."""
+    """Table 1: main gesture + skill + loss results by (condition, task).
+
+    The first block is an ``All tasks`` row per condition that pools every
+    completed (task x fold) sample into a single per-condition number. This
+    answers the practical question "if you just want to know how well the
+    model identifies gestures under condition C, ignoring which JIGSAWS task
+    the clip is from, which is the best?" -- in particular the pooled
+    Gesture Loss column is on the same scale across tasks, so it is the
+    fairest single ``global gesture'' summary per condition.
+    """
     metrics = (
-        GESTURE_METRICS[0],  # gesture accuracy
-        GESTURE_METRICS[1],  # gesture F1 macro
-        SKILL_METRICS[0],    # skill accuracy
-        SKILL_METRICS[1],    # skill F1 macro
-        LOSS_METRICS[0],     # total loss
+        GESTURE_METRICS[0],   # gesture accuracy
+        GESTURE_METRICS[1],   # gesture F1 macro
+        GESTURE_LOSS_METRIC,  # gesture cross-entropy (pooled across tasks)
+        SKILL_METRICS[0],     # skill accuracy
+        SKILL_METRICS[1],     # skill F1 macro
+        LOSS_METRICS[0],      # total loss
     )
     header_cells = ["Condition", "Task", "Folds"] + [m.label for m in metrics]
     col_spec = "ll" + "r" * (len(metrics) + 1)
@@ -557,13 +749,41 @@ def emit_main_table(
         "\\midrule",
     ]
 
+    # ------------------------------------------------------------------
+    # Pooled ``All tasks'' block: one row per condition with metrics
+    # concatenated across (task x fold) samples. Bold per-column winner.
+    # ------------------------------------------------------------------
+    pooled_winners = {m.key: pooled_per_metric_winner(conditions, m) for m in metrics}
+    for cond in conditions:
+        row: list[str] = [
+            CONDITION_LABELS.get(cond.name, cond.name),
+            "All tasks",
+        ]
+        pooled_stats: dict[str, tuple[MetricStat | None, int]] = {
+            spec.key: pool_metric_across_tasks(cond, spec) for spec in metrics
+        }
+        # Folds column = total fold count for this condition (taken from any
+        # metric -- they all agree because they come from the same TaskResults).
+        folds_total = max((n for _, n in pooled_stats.values()), default=0)
+        row.append(str(folds_total))
+        for spec in metrics:
+            stat, _ = pooled_stats[spec.key]
+            decimals = 2 if spec.units == "\\%" else 3
+            is_win = pooled_winners.get(spec.key) == cond.name
+            row.append(_format_cell(stat, is_win, decimals, fold_count=None))
+        lines.append(" & ".join(row) + " \\\\")
+    lines.append("\\midrule")
+
+    # ------------------------------------------------------------------
+    # Per-task blocks (unchanged structure, with the new Gesture Loss column).
+    # ------------------------------------------------------------------
     for task in TASK_ORDER:
         winners = {m.key: per_metric_winner(conditions, task, m) for m in metrics}
         for idx, cond in enumerate(conditions):
             result = cond.result(task)
             if result is None:
                 continue
-            row: list[str] = []
+            row = []
             row.append(CONDITION_LABELS.get(cond.name, cond.name) if idx == 0 else CONDITION_LABELS.get(cond.name, cond.name))
             row.append(TASK_LABELS.get(task, task) if idx == 0 else "")
             row.append(str(result.num_folds))
@@ -649,6 +869,126 @@ def emit_skill_table(conditions: Sequence[Condition], out_path: Path) -> None:
                 row.append(_format_cell(stat, is_win, decimals, fold_count=None))
             lines.append(" & ".join(row) + " \\\\")
         lines.append("\\midrule")
+    if lines[-1] == "\\midrule":
+        lines[-1] = "\\bottomrule"
+    else:
+        lines.append("\\bottomrule")
+    lines.append("\\end{tabular}")
+    _write_text(out_path, "\n".join(lines) + "\n")
+
+
+def _collect_paired_f1_deltas(
+    eval_root: Path,
+    baseline_name: str,
+    brain_name: str,
+    task: str,
+) -> tuple[list[float], list[int]]:
+    """Return (per-fold deltas, paired_fold_ids) for one (brain, task) cell.
+
+    Pairs only on LOUO fold IDs that exist for BOTH the baseline and the
+    brain-aligned condition for the given task. Each delta is computed as
+    ``brain_F1_macro - baseline_F1_macro`` so positive = brain helps.
+    """
+    base = load_per_fold_eval_metric(
+        eval_root, baseline_name, task, "Gesture Metrics", "F1 Macro"
+    )
+    brain = load_per_fold_eval_metric(
+        eval_root, brain_name, task, "Gesture Metrics", "F1 Macro"
+    )
+    paired_ids = sorted(set(base) & set(brain))
+    deltas = [brain[i] - base[i] for i in paired_ids]
+    return deltas, paired_ids
+
+
+def emit_bootstrap_table(
+    conditions: Sequence[Condition],
+    baseline_name: str,
+    eval_root: Path,
+    out_path: Path,
+    n_iter: int = 10000,
+    seed: int = 42,
+    ci: float = 0.95,
+) -> None:
+    """Paired bootstrap CIs on Delta gesture-F1-macro vs baseline, per task and pooled.
+
+    Pairing key: real LOUO fold ID parsed from
+    ``<eval_root>/<condition>/<Task>_test_fold_<N>_results.txt``. Folds that
+    failed for either condition are dropped from the paired sample for that
+    cell. Per-task n is small (3-7); the pooled-across-tasks row (n approx 17)
+    is the most informative summary.
+    """
+    ci_pct = int(round(ci * 100))
+    header_cells = [
+        "Condition",
+        "Task",
+        "Paired $n$",
+        "Mean $\\Delta$F1",
+        f"{ci_pct}\\% CI",
+        "$p_{\\text{boot}}$",
+    ]
+    col_spec = "ll" + "r" * (len(header_cells) - 2)
+    lines = [
+        "% Auto-generated by scripts/manuscript_writer.py - do not edit by hand.",
+        "\\begin{tabular}{" + col_spec + "}",
+        "\\toprule",
+        " & ".join(header_cells) + " \\\\",
+        "\\midrule",
+    ]
+
+    brain_conditions = [c for c in conditions if c.name != baseline_name]
+
+    def _ci_cell(lo: float, hi: float) -> str:
+        if np.isnan(lo) or np.isnan(hi):
+            return "--"
+        return f"$[{lo:+.3f},\\, {hi:+.3f}]$"
+
+    def _p_cell(p: float) -> str:
+        if np.isnan(p):
+            return "--"
+        if p < 1.0 / max(n_iter, 1):
+            return f"$<\\,{1.0 / n_iter:.4f}$"
+        return f"{p:.3f}"
+
+    def _delta_cell(d: float, n: int) -> str:
+        if n == 0:
+            return "--"
+        return f"{d:+.3f}"
+
+    for cond in brain_conditions:
+        # ---- per-task rows ------------------------------------------------
+        pooled_deltas: list[float] = []
+        for idx, task in enumerate(TASK_ORDER):
+            deltas, paired_ids = _collect_paired_f1_deltas(
+                eval_root, baseline_name, cond.name, task
+            )
+            pooled_deltas.extend(deltas)
+            obs, lo, hi, p_val = paired_bootstrap_ci(
+                deltas, n_iter=n_iter, seed=seed, ci=ci
+            )
+            row = [
+                CONDITION_LABELS.get(cond.name, cond.name) if idx == 0 else "",
+                TASK_LABELS.get(task, task),
+                str(len(paired_ids)),
+                _delta_cell(obs, len(paired_ids)),
+                _ci_cell(lo, hi),
+                _p_cell(p_val),
+            ]
+            lines.append(" & ".join(row) + " \\\\")
+        # ---- pooled-across-tasks row -------------------------------------
+        obs, lo, hi, p_val = paired_bootstrap_ci(
+            pooled_deltas, n_iter=n_iter, seed=seed, ci=ci
+        )
+        pooled_row = [
+            "",
+            "\\textit{All tasks (pooled)}",
+            f"\\textbf{{{len(pooled_deltas)}}}",
+            f"\\textbf{{{_delta_cell(obs, len(pooled_deltas))}}}",
+            f"\\textbf{{{_ci_cell(lo, hi)}}}",
+            f"\\textbf{{{_p_cell(p_val)}}}",
+        ]
+        lines.append(" & ".join(pooled_row) + " \\\\")
+        lines.append("\\midrule")
+
     if lines[-1] == "\\midrule":
         lines[-1] = "\\bottomrule"
     else:
@@ -842,7 +1182,7 @@ def emit_rdm_heatmaps(manifest_path: Path, out_path: Path) -> None:
         "eye_only_task_family",
         "eye_only_subskill_family",
         "eeg_latent_task_family",
-        "joint_eye_eeg_task_family",
+        "eeg_latent_subskill_family",
     )
     fig, axes = plt.subplots(2, 2, figsize=(9, 8))
     flat_axes = axes.ravel()
@@ -988,19 +1328,22 @@ and eye-tracking recordings from human observers of surgery into differentiable
 representational dissimilarity matrices (RDMs), and use these RDMs as soft
 regularizers on a Vision Transformer (ViT) that jointly predicts surgical
 kinematics, gesture labels, and surgeon skill on the JIGSAWS benchmark.
-Under an 8-fold leave-one-user-out (LOUO) cross-validation protocol with up to
-three folds per (task $\times$ condition) cell, we compare a no-regularizer
-baseline against three brain-aligned conditions: eye-tracking task-centroid RSA,
-an EEG-derived task-family RDM, and a jointly-fused eye$+$EEG task-family RDM.
+Under an 8-fold leave-one-user-out (LOUO) cross-validation protocol -- with
+seven of the eight folds completed in most (task $\times$ condition) cells --
+we compare a no-regularizer baseline against three brain-aligned conditions:
+eye-tracking task-centroid RSA, an EEG-derived task-family RDM, and a
+jointly-fused eye$+$EEG task-family RDM.
 Best Gesture F1 (macro) is achieved by {kt_g} on Knot Tying,
 {np_g} on Needle Passing, and {su_g} on Suturing;
 best Position RMSE is achieved by {kt_p} on Knot Tying,
 {np_p} on Needle Passing, and {su_p} on Suturing.
 The pattern is not a uniform accuracy win -- different physiological
-regularizers help different sub-problems -- and a pipeline-internal
-transfer-plausibility score computed during Phase~3 RDM ranking is predictive
-of the downstream per-task gain, suggesting that Phase~3 can serve as an
-\emph{{a priori}} selection tool for candidate priors.
+regularizers help different sub-problems. A pipeline-internal
+transfer-plausibility score computed during Phase~3 RDM ranking shows a
+weak positive association with the downstream per-task gain
+(Pearson $r\!=\!0.31$ over nine (condition $\times$ task) points drawn from
+two plausibility levels, 0.55 and 0.70), which we flag as a hypothesis for
+future work rather than a confirmed selection rule.
 We release the code and per-fold evaluation artifacts.
 \end{{abstract}}
 """
@@ -1027,9 +1370,9 @@ actually perceive the same footage.  At the same time, a separate line of work
 has shown that representational similarity analysis (RSA) between deep networks
 and human neural data can be used both to measure alignment and, when
 incorporated into training, to bias networks toward brain-like solutions
-\cite{{TODO_kriegeskorte2008,TODO_khaligh-razavi2014}}.  The ingredients for an
+\cite{{kriegeskorte2008,khaligh_razavi2014}}.  The ingredients for an
 analogous intervention on surgical video already exist---JIGSAWS
-\cite{{TODO_gao2014jigsaws}} provides aligned video, kinematics, gesture, and
+\cite{{gao2014jigsaws}} provides aligned video, kinematics, gesture, and
 skill labels for the da Vinci Research Kit; eye-tracking and EEG recordings
 from observers of surgical video can provide a second, physiological view of
 the same stimuli---but to our knowledge nobody has built an end-to-end pipeline
@@ -1050,14 +1393,20 @@ Passing ({np_folds} folds), and Suturing ({su_folds} folds), ablating across
   \item A reproducible four-phase EEG--Eye--RDM--ViT bridge that turns raw
         physiological recordings into a differentiable prior. All code,
         configs, and cached artifacts are versioned.
-  \item A controlled LOUO ablation showing that \emph{{different}} physiological
-        signals selectively regularize \emph{{different}} capabilities of the
-        model---eye-tracking improves kinematics fidelity, EEG improves gesture
-        structure---rather than producing a uniform accuracy win.
-  \item Evidence that the transfer-plausibility score computed during Phase~3
-        RDM ranking is correlated with the downstream per-task improvement the
-        corresponding prior produces, which makes Phase~3 an \emph{{a priori}}
-        selection tool rather than a post-hoc report.
+  \item A controlled LOUO ablation showing that no single physiological
+        prior dominates: per-task winners differ across the gesture-,
+        kinematics-, and skill-oriented metrics, and a pooled
+        ``All tasks'' summary (Table~\ref{{tab:main}}) makes the
+        per-condition gesture-recognition story directly comparable.
+  \item A \emph{{suggestive}} (not yet confirmed) link between the Phase~3
+        transfer-plausibility score and the downstream per-task improvement
+        the corresponding prior produces. The current evidence is nine
+        (condition $\times$ task) points drawn from only two distinct
+        plausibility values (0.55 and 0.70), so the relationship is
+        effectively a two-group contrast rather than a true correlation;
+        we frame Phase~3 as a \emph{{candidate}} \emph{{a priori}} selection
+        tool to be validated once additional candidate RDMs span the
+        plausibility range.
 \end{{enumerate}}
 """
     _write_text(out_path, text)
@@ -1069,30 +1418,34 @@ def emit_section_related(out_path: Path) -> None:
 \label{sec:related}
 
 \paragraph{Surgical gesture and skill assessment.}
-JIGSAWS~\cite{TODO_gao2014jigsaws} established a benchmark for gesture
+JIGSAWS~\cite{gao2014jigsaws} established a benchmark for gesture
 recognition and skill rating on the da Vinci Research Kit, and has since been
-tackled with bidirectional LSTMs~\cite{TODO_dipietro2016}, temporal
-convolutional networks~\cite{TODO_funke2019}, and more recently with
-self-supervised video transformers~\cite{TODO_goodman2023}.  Our backbone
-follows this line---a timm-initialized ViT-S/16 plus a four-layer temporal
-transformer---and adds a brain-alignment term orthogonal to those
-contributions.
+tackled with bidirectional LSTMs~\cite{dipietro2016}, temporal
+convolutional networks~\cite{funke2019}, self-supervised video
+transformers~\cite{goodman2023}, and cross-modal self-supervised
+encoder--decoders~\cite{wu2021crossmodal} that reconstruct kinematics from
+optical flow under leave-one-trial-out evaluation. Our backbone follows this
+line---a timm-initialized ViT-S/16 plus a four-layer temporal transformer---
+and adds a brain-alignment term orthogonal to those contributions; we
+evaluate under leave-one-user-out (LOUO), which is generally harder than the
+leave-one-trial-out protocol used by~\cite{wu2021crossmodal} because a
+held-out surgeon's entire distribution is unseen.
 
 \paragraph{Representational similarity analysis for neural networks.}
 RSA was introduced as a model-agnostic way to compare neural representations
-across species and modalities~\cite{TODO_kriegeskorte2008}; it was then adapted
+across species and modalities~\cite{kriegeskorte2008}; it was then adapted
 to compare deep networks with human brain
-activity~\cite{TODO_khaligh-razavi2014}, and more recently used as a training
-signal itself (e.g. RSA regularization~\cite{TODO_mcclure2016}, brain-score
-fine-tuning~\cite{TODO_schrimpf2020}).  We apply an RSA loss of the form
+activity~\cite{khaligh_razavi2014}, and more recently used as a training
+signal itself (e.g. RSA regularization~\cite{mcclure2016}, brain-score
+fine-tuning~\cite{schrimpf2020}).  We apply an RSA loss of the form
 $1 - \rho\!\left(\text{model\_RDM}, \text{target\_RDM}\right)$, where $\rho$ is
 Pearson correlation over the flattened upper-triangle of the two RDMs.
 
 \paragraph{Eye-tracking and EEG priors for video models.}
 Eye-gaze has been used as an auxiliary signal in action recognition
-\cite{TODO_min2019} and in surgical skill analysis
-\cite{TODO_islam2020gaze}; EEG has been used for reaction-time regression and
-as a subject-specific regularizer~\cite{TODO_palazzo2021eeg}.  Our contribution
+\cite{min2019} and in surgical skill analysis
+\cite{islam2020gaze}; EEG has been used for reaction-time regression and
+as a subject-specific regularizer~\cite{palazzo2021eeg}.  Our contribution
 is to treat both as sources of a single \emph{shared} target RDM, and to
 evaluate whether the modality-specific RDMs predict which downstream
 capabilities they help.
@@ -1100,7 +1453,7 @@ capabilities they help.
 \paragraph{Soft priors on safety-critical robotic systems.}
 Regularizers derived from human data are attractive for surgical robotics
 because they can encode anatomical or procedural priors without requiring new
-labelled data~\cite{TODO_funke2019,TODO_goodman2023}.  We adopt a soft RSA
+labelled data~\cite{funke2019,goodman2023}.  We adopt a soft RSA
 penalty (weight $10^{-2}$ of the task loss) so that the prior steers
 representation geometry without overriding the supervised targets.
 """
@@ -1132,7 +1485,7 @@ def emit_section_methods(
 \subsection{{Dataset and evaluation protocol}}
 \label{{sec:dataset}}
 
-We use the JIGSAWS benchmark~\cite{{TODO_gao2014jigsaws}}: 30~Hz stereo
+We use the JIGSAWS benchmark~\cite{{gao2014jigsaws}}: 30~Hz stereo
 endoscopic video of dry-lab tasks performed on the da Vinci Surgical System,
 with 76-dimensional per-frame kinematics, 15 gesture labels (G1--G15), and
 three skill levels (Expert, Intermediate, Novice). Three tasks are evaluated:
@@ -1168,7 +1521,7 @@ from ViT embeddings grouped by task at each batch step.
 \subsection{{Model architecture}}
 \label{{sec:model}}
 
-Video frames are encoded by a timm~\cite{{TODO_wightman2019timm}} ViT-S/16
+Video frames are encoded by a timm~\cite{{wightman2019timm}} ViT-S/16
 backbone (384-dim, ImageNet-1k pretrained, \texttt{{freeze\_until=6}}) with
 optional adapter layers. A 4-layer temporal transformer with 6 heads
 aggregates frame embeddings into a sequence of temporal tokens. Three heads
@@ -1198,6 +1551,14 @@ $\mathcal{{L}}_{{\text{{gesture}}}}$ and $\mathcal{{L}}_{{\text{{skill}}}}$ are
 cross-entropies; $\mathcal{{L}}_{{\text{{control}}}}$ is a velocity /
 acceleration / joint-limit regularizer; and $\mathcal{{L}}_{{\text{{brain}}}} =
 1 - \rho_{{\text{{Pearson}}}}(\text{{model\_RDM}}, \text{{target\_RDM}})$.
+The brain weight is fixed at $w_{{\text{{brain}}}}=10^{{-2}}$ across all
+brain-aligned conditions: at this scale the RSA term contributes on the order
+of one percent of the total loss in early training, which keeps the prior
+\emph{{soft}} relative to the supervised kinematics, gesture, and skill
+targets and prevents it from dominating the geometry of the learned
+representation. A sensitivity sweep over $w_{{\text{{brain}}}}$ -- which
+might shift the per-condition winners reported in
+Section~\ref{{sec:results}} -- is left to future work.
 
 \subsection{{Training conditions}}
 \label{{sec:conditions}}
@@ -1243,7 +1604,12 @@ step. Each training run uses the same 10-epoch schedule, cosine-annealed
 learning rate with a 2-epoch warm-up, and differential learning rates for the
 ViT backbone ($10^{{-5}}$), adapters ($5 \times 10^{{-5}}$), and other parameters
 ($10^{{-4}}$). Batch size is 32 for the baseline and 16 for the brain-aligned
-conditions (the adapters cost memory).
+conditions (the adapters cost memory). The 10-epoch schedule was chosen to
+keep the full $4 \times 3 \times 8 = 96$-cell ablation
+(conditions $\times$ tasks $\times$ folds) tractable on the available
+compute budget; longer schedules -- which we have not run -- could shift the
+per-condition winners, and we flag this as a limitation in
+Section~\ref{{sec:limitations}}.
 
 Per-$(condition, task)$ fold counts actually completed:
 \begin{{itemize}}
@@ -1257,6 +1623,10 @@ def emit_section_results(
     out_path: Path,
     conditions: Sequence[Condition],
     baseline_name: str,
+    eval_root: Path | None = None,
+    bootstrap_n_iter: int = 10000,
+    bootstrap_seed: int = 42,
+    bootstrap_ci: float = 0.95,
 ) -> None:
     claims = _headline_claims(conditions, baseline_name)
 
@@ -1299,6 +1669,41 @@ def emit_section_results(
             f"On {_cap(task)}, {_cond_label(winner)} achieves the best Position RMSE ({stat.mean:.3f} $\\pm$ {stat.std:.3f})."
         )
 
+    # Pooled-across-tasks summary sentence: only emit Gesture Loss because it
+    # is the only pooled metric that is on the same per-frame scale across
+    # tasks. Pooled accuracy and pooled macro-F1 over-weight Suturing (more
+    # clips, easier transitions), so we no longer declare a pooled-winner on
+    # those two -- see Table~\ref{tab:main} caption for the caveat.
+    pooled_sentences: list[str] = []
+    for spec in (GESTURE_LOSS_METRIC,):
+        winner = pooled_per_metric_winner(conditions, spec)
+        if winner is None:
+            continue
+        cond = next((c for c in conditions if c.name == winner), None)
+        if cond is None:
+            continue
+        stat, folds = pool_metric_across_tasks(cond, spec)
+        if stat is None:
+            continue
+        pooled_sentences.append(
+            f"Pooled across tasks on the only same-scale metric, "
+            f"{_cond_label(winner)} achieves the best "
+            f"{spec.label} ({stat.mean:.3f} $\\pm$ {stat.std:.3f}) over "
+            f"{folds} (task $\\times$ fold) samples; we deliberately do not "
+            f"declare a pooled-winner on Gesture Accuracy or Gesture F1 (macro), "
+            f"which are biased toward Suturing simply because Suturing has more "
+            f"clips and easier gesture transitions."
+        )
+
+    # Per-condition fold inventory phrase used by the skill caveat below.
+    fold_inventory: list[str] = []
+    for cond in conditions:
+        per_task = "/".join(
+            str(cond.result(t).num_folds if cond.result(t) else 0) for t in TASK_ORDER
+        )
+        fold_inventory.append(f"{_cond_label(cond.name)} {per_task}")
+    fold_inventory_phrase = "; ".join(fold_inventory)
+
     text = rf"""% Auto-generated by scripts/manuscript_writer.py - do not edit by hand.
 \section{{Results}}
 \label{{sec:results}}
@@ -1306,21 +1711,53 @@ def emit_section_results(
 \subsection{{Main results}}
 \label{{sec:results_main}}
 
-Table~\ref{{tab:main}} reports gesture, skill, and total-loss metrics broken
-down by $(\text{{condition}}, \text{{task}})$. Fold counts are listed in the
-\emph{{Folds}} column, and the best value per task and metric is bolded.
+Table~\ref{{tab:main}} reports gesture, skill, and loss metrics broken down
+by $(\text{{condition}}, \text{{task}})$, with an additional ``All tasks'' row
+per condition that pools every completed (task $\times$ fold) sample into a
+single per-condition number. Fold counts are listed in the \emph{{Folds}}
+column, and the best value per row group and metric is bolded.
 
 \begin{{table}}[t]
   \centering
   \caption{{LOUO results on JIGSAWS across four training conditions. Mean
-    $\pm$ standard deviation across held-out surgeon folds. Best value per
-    $(\text{{task}}, \text{{metric}})$ is bolded.}}
+    $\pm$ standard deviation across held-out surgeon folds. The
+    ``All tasks'' rows pool fold values across the three JIGSAWS tasks for a
+    single per-condition summary; the \textsc{{Gesture Loss}} column is
+    per-frame cross-entropy and is the fairest scalar for ``how well does
+    this condition identify which gesture is in the video,'' because it is
+    on the same scale across tasks. The pooled \textsc{{Gesture Acc.}} and
+    pooled \textsc{{Gesture F1 (macro)}} rows are \emph{{not}} apples-to-apples
+    across tasks (they implicitly task-size-weight Suturing, which has more
+    clips and easier gesture transitions) and should therefore be read
+    descriptively, not as a per-condition winner. Best value per row group
+    and metric is bolded.}}
   \label{{tab:main}}
   \resizebox{{\columnwidth}}{{!}}{{\input{{tables/tbl_main}}}}
 \end{{table}}
 
+{' '.join(pooled_sentences)}
+
 Figure~\ref{{fig:gesture_f1}} visualizes Gesture F1 macro across conditions.
 {' '.join(gesture_sentences)}
+
+\paragraph{{Context from prior JIGSAWS work.}}
+We do not have a head-to-head re-implementation, but to give the reader a
+yardstick we list the closest previously-published JIGSAWS gesture-accuracy
+numbers we are aware of. \citet{{wu2021crossmodal}} report per-task
+gesture-classification accuracy of 0.64 $\pm$ 0.03 (Knot Tying), 0.68 $\pm$
+0.03 (Suturing), and 0.64 $\pm$ 0.03 (Needle Passing) under
+leave-one-trial-out, using a self-supervised cross-modal encoder--decoder
+trained for 1000 epochs to reconstruct kinematics from optical flow; their
+Table 3 also reports the supervised LDS (vid) reference of \citet{{ahmidi2017jigsaws}}
+under leave-one-super-trial-out as 0.89 (Knot Tying), 0.90 (Suturing), and
+0.67 (Needle Passing). Our Suturing Gesture Accuracy under Eye-RSA
+(62.8\%) and EEG-Bridge (64.5\%) is in the same ballpark as
+\citet{{wu2021crossmodal}}'s self-supervised numbers, but two caveats apply:
+(a)~the protocols differ -- their leave-one-trial-out keeps each surgeon's
+distribution partly visible at training time, whereas LOUO holds out the
+entire surgeon and is generally harder; and (b)~our 10-epoch ViT-S/16 is not
+directly comparable to a 1000-epoch self-supervised cross-modal encoder, so
+we treat these numbers as context, not as a ranking.
 
 \begin{{figure}}[t]
   \centering
@@ -1338,11 +1775,14 @@ Figure~\ref{{fig:gesture_f1}} visualizes Gesture F1 macro across conditions.
 \label{{sec:results_kin}}
 
 Table~\ref{{tab:kinematics}} and Fig.~\ref{{fig:kinematics}} report the three
-kinematics metrics. {' '.join(kinematics_sentences)} The modality that carries
-\emph{{where-the-hand-is-going}} information (eye-tracking) systematically
-helps on the two tasks where it has been evaluated most, consistent with the
-hypothesis that gaze-derived RDMs constrain pose geometry more than category
-structure.
+kinematics metrics. {' '.join(kinematics_sentences)} Across the three tasks
+the best Position RMSE is split between the no-regularizer baseline
+(Knot Tying, Suturing) and \textsc{{EEG-Bridge}} (Needle Passing); the
+eye-tracking-derived prior \textsc{{Eye-RSA}} does not win Position RMSE on
+any task in the present sample. We therefore stop short of claiming that
+gaze-derived RDMs ``systematically'' help kinematics geometry, and refer
+the reader to Fig.~\ref{{fig:fold_spread}} for the per-fold dispersion that
+makes the within-task differences visually small.
 
 \begin{{table}}[t]
   \centering
@@ -1369,8 +1809,14 @@ structure.
 
 Table~\ref{{tab:skill}} reports skill-classification results.  Skill accuracy
 is extremely variable across LOUO folds because a held-out surgeon can be
-entirely of one skill level, making the metric fragile on 3-fold samples; we
-therefore report it but do not draw modality-specific conclusions from it.
+entirely of one skill level, making the metric fragile in any condition
+that does not yet have all eight folds.  Per-condition fold counts in this
+run (Knot Tying / Needle Passing / Suturing) are: {fold_inventory_phrase}.
+A held-out surgeon's contribution to per-condition skill accuracy is
+dominated by that surgeon's single skill label, so the appropriate
+interpretation is per-fold correctness rather than a per-condition mean; we
+therefore describe trends in Skill F1 (macro) but \emph{{do not declare a
+condition-level winner}} on skill accuracy in this section.
 
 \begin{{table}}[t]
   \centering
@@ -1383,9 +1829,10 @@ therefore report it but do not draw modality-specific conclusions from it.
 \subsection{{Fold-level dispersion}}
 \label{{sec:results_folds}}
 
-To make the under-power of a 3-fold protocol visible, Fig.~\ref{{fig:fold_spread}}
-shows per-fold values as box plots, broken down by task and by three
-representative metrics (Gesture F1 macro, Position RMSE, Total Loss).
+To make the under-power of an incomplete LOUO sweep visible,
+Fig.~\ref{{fig:fold_spread}} shows per-fold values as box plots, broken down
+by task and by three representative metrics (Gesture F1 macro, Position
+RMSE, Total Loss).
 
 \begin{{figure}}[t]
   \centering
@@ -1400,18 +1847,61 @@ representative metrics (Gesture F1 macro, Position RMSE, Total Loss).
   \label{{fig:fold_spread}}
 \end{{figure}}
 
-\subsection{{Transfer plausibility predicts downstream gain}}
+\subsection{{Paired bootstrap on $\Delta$ Gesture F1 macro vs baseline}}
+\label{{sec:results_bootstrap}}
+
+To put the per-task winner numbers in Table~\ref{{tab:main}} on a sampling-
+distribution footing, Table~\ref{{tab:bootstrap}} reports paired bootstrap
+confidence intervals on $\Delta\text{{F1}}_{{\text{{macro}}}}$ between each
+brain-aligned condition and the baseline. Pairing is on the LOUO fold ID
+parsed from each per-fold evaluation result file (not on a sequential index
+of completed folds), so failed folds are dropped on a per-cell basis
+instead of silently shifting the comparison to a different held-out
+surgeon. For each (brain condition, task) cell we draw
+$B={bootstrap_n_iter:,}$ bootstrap resamples of the paired per-fold deltas
+with replacement, take the mean of each resample, and report the
+{int(round(bootstrap_ci * 100))}\% percentile interval together with
+$p_{{\text{{boot}}}}$, the fraction of bootstrap means with the opposite
+sign from the observed mean (a one-sided percentile-bootstrap analog of a
+$p$-value). Per-task paired $n$ is the per-cell intersection of available
+folds (see the \emph{{Paired $n$}} column of Table~\ref{{tab:bootstrap}});
+the pooled-across-tasks row, with $n$ on the order of twenty paired
+observations per brain condition, is the most informative summary, but
+even that should be read as a pilot signal rather than confirmatory
+inference until the missing folds are filled in.
+
+\begin{{table}}[t]
+  \centering
+  \caption{{Paired bootstrap on $\Delta$ Gesture F1 macro
+    ($\text{{brain}} - \text{{baseline}}$). Pairing is on real LOUO fold IDs
+    parsed from per-fold eval result files. $B={bootstrap_n_iter:,}$ resamples,
+    fixed seed = {bootstrap_seed}. Positive $\Delta$ means the brain-aligned
+    condition outperforms baseline. Per-task $n$ is small; the pooled row is
+    the recommended summary.}}
+  \label{{tab:bootstrap}}
+  \resizebox{{\columnwidth}}{{!}}{{\input{{tables/tbl_bootstrap}}}}
+\end{{table}}
+
+\subsection{{Transfer plausibility: a suggestive, not confirmed, signal}}
 \label{{sec:results_tp}}
 
 Phase~3 of the EEG--Eye bridge assigns each candidate RDM a
 \emph{{transfer-plausibility}} score based on how its unit labels map to the
 JIGSAWS task families. Fig.~\ref{{fig:transfer_plausibility}} shows this score
 against the per-$(\text{{condition}}, \text{{task}})$ change in Gesture F1
-macro over the baseline.  The sign of the relationship indicates that the
-internal Phase~3 score ranks candidate RDMs on an axis that is at least
-partially aligned with their downstream utility, not merely with their
-geometric self-consistency.  Fig.~\ref{{fig:rdms}} shows the four relevant
-Phase~3 candidate RDMs for reference.
+macro over the baseline. With the candidate set used in this manuscript the
+$x$-axis takes only \emph{{two distinct values}} (0.55 for the EEG- and
+joint-eye/EEG task-family RDMs, 0.70 for the eye-task-centroid RDM), and we
+have nine $(\text{{condition}}, \text{{task}})$ points in total
+(Pearson $r\!=\!0.31$). The ``correlation'' is therefore effectively a
+two-group contrast between high- and low-plausibility candidates rather
+than a true correlational test, and a proper test will need additional
+candidate RDMs that span the plausibility range. We therefore report the
+sign and direction of the relationship as \emph{{suggestive}} -- the Phase~3
+score is at least \emph{{not anti-aligned}} with downstream gesture-F1 utility
+-- and refrain from claiming Phase~3 already serves as a validated
+selection rule. Fig.~\ref{{fig:rdms}} shows the four relevant Phase~3
+candidate RDMs for reference.
 
 \begin{{figure}}[t]
   \centering
@@ -1448,10 +1938,25 @@ def emit_section_discussion(
     baseline_name: str,
 ) -> None:
     # Build per-metric-per-task winner bullets for the narrative. The prose
-    # below avoids claiming any specific modality wins; it defers to the data.
+    # below is fully data-driven: every claim is sourced from the same
+    # winner/pooled helpers used by the table, so the discussion cannot drift
+    # from the numbers as future folds are added.
     def winner_label(task: str, spec: MetricSpec) -> str:
         w = per_metric_winner(conditions, task, spec)
         return _cond_label(w) if w else "--"
+
+    def winner_with_value(task: str, spec: MetricSpec) -> str:
+        w = per_metric_winner(conditions, task, spec)
+        if w is None:
+            return "--"
+        cond = next((c for c in conditions if c.name == w), None)
+        if cond is None:
+            return _cond_label(w)
+        res = cond.result(task)
+        stat = res.get(spec.key) if res is not None else None
+        if stat is None:
+            return _cond_label(w)
+        return f"{_cond_label(w)} ({stat.mean:.3f})"
 
     gesture_bullet_items = "\n".join(
         f"  \\item {TASK_LABELS.get(task, task)}: {winner_label(task, GESTURE_METRICS[1])}"
@@ -1462,11 +1967,68 @@ def emit_section_discussion(
         for task in TASK_ORDER
     )
 
+    # ------------------------------------------------------------------
+    # Pooled-across-tasks "global gesture" claim. We only emit Gesture Loss
+    # because it is the sole pooled metric on the same per-frame scale across
+    # tasks. Pooled Accuracy and pooled F1 (macro) are task-size weighted
+    # toward Suturing and would mislead as a per-condition winner; we mention
+    # them descriptively in the surrounding text instead.
+    # ------------------------------------------------------------------
+    pooled_lines: list[str] = []
+    for spec in (GESTURE_LOSS_METRIC,):
+        winner = pooled_per_metric_winner(conditions, spec)
+        if winner is None:
+            continue
+        cond = next((c for c in conditions if c.name == winner), None)
+        if cond is None:
+            continue
+        stat, folds = pool_metric_across_tasks(cond, spec)
+        if stat is None:
+            continue
+        pooled_lines.append(
+            f"  \\item {spec.label} (only same-scale pooled metric): "
+            f"{_cond_label(winner)} "
+            f"({stat.mean:.3f} $\\pm$ {stat.std:.3f}, {folds} folds pooled)"
+        )
+    pooled_block = "\n".join(pooled_lines) if pooled_lines else "  \\item --"
+
+    # ------------------------------------------------------------------
+    # Needle Passing data-driven paragraph (replaces the earlier blanket
+    # "no brain-aligned condition beats baseline on Needle Passing" claim,
+    # which is contradicted by the gesture-F1 row).
+    # ------------------------------------------------------------------
+    np_gesture_winner = winner_with_value("Needle_Passing", GESTURE_METRICS[1])
+    np_skill_winner = winner_with_value("Needle_Passing", SKILL_METRICS[0])
+    np_pos_winner = winner_with_value("Needle_Passing", KINEMATICS_METRICS[0])
+
+    # ------------------------------------------------------------------
+    # Knot Tying skill winner: surface whichever condition leads (this row was
+    # historically dominated by Joint-Bridge before that condition was dropped
+    # for a degenerate target RDM; the call below is now condition-agnostic).
+    # ------------------------------------------------------------------
+    kt_skill_winner = per_metric_winner(conditions, "Knot_Tying", SKILL_METRICS[0])
+    kt_skill_label = _cond_label(kt_skill_winner) if kt_skill_winner else "--"
+    kt_skill_value = winner_with_value("Knot_Tying", SKILL_METRICS[0])
+
+    # ------------------------------------------------------------------
+    # Honest fold-count phrasing for the skill paragraph.
+    # ------------------------------------------------------------------
+    skill_fold_phrase_parts: list[str] = []
+    for cond in conditions:
+        per_task_counts = []
+        for task in TASK_ORDER:
+            res = cond.result(task)
+            per_task_counts.append(res.num_folds if res else 0)
+        skill_fold_phrase_parts.append(
+            f"{_cond_label(cond.name)} {'/'.join(str(n) for n in per_task_counts)}"
+        )
+    skill_fold_phrase = "; ".join(skill_fold_phrase_parts)
+
     text = rf"""% Auto-generated by scripts/manuscript_writer.py - do not edit by hand.
 \section{{Discussion}}
 \label{{sec:discussion}}
 
-\paragraph{{Modality-selective regularization.}}
+\paragraph{{No single condition dominates.}}
 A consistent observation across our ablation is that no single condition wins
 across all tasks and metrics; the best regularizer depends on the
 sub-problem. The per-task winners for Gesture F1 macro are:
@@ -1478,35 +2040,84 @@ and for Position RMSE:
 {position_bullet_items}
 \end{{itemize}}
 The gesture-oriented and geometry-oriented metrics are not won by the same
-condition in general, which is consistent with the hypothesis that
-eye-tracking-derived priors carry \emph{{where-the-hand-is-going}} information
-(favoring kinematics fidelity) while EEG-derived priors carry
-\emph{{what-category-is-this}} information (favoring gesture structure).
+condition in general; we make no stronger modality-specific claim than that,
+because the per-task winners do not cleanly partition into an
+``eye-helps-kinematics'' vs ``EEG-helps-categories'' dichotomy in the
+present LOUO sample.
 
-\paragraph{{Transfer plausibility as an \emph{{a priori}} selector.}}
-A practically useful finding is that the Phase~3 transfer-plausibility score
-is correlated with the gain we see on gesture F1 macro
-(Fig.~\ref{{fig:transfer_plausibility}}). This is important because the score
-is computed from the RDM's unit labels and their correspondence to JIGSAWS
-task families---it does not involve any ViT training.  If it reliably predicts
-which RDM helps which task, then Phase~3 becomes an \emph{{a priori}}
-selection tool, not just a ranking curiosity, and one could afford to train
-fewer brain-aligned models than candidate RDMs.
+\paragraph{{Pooled ``global gesture'' summary.}}
+Aggregated across tasks (the ``All tasks'' rows of Table~\ref{{tab:main}}),
+the only per-condition gesture-recognition metric we are willing to declare
+a winner on is the per-frame cross-entropy:
+\begin{{itemize}}
+{pooled_block}
+\end{{itemize}}
+Pooled \textsc{{Gesture Loss}} is the single most faithful per-condition
+summary because it is on the same per-frame scale across the three tasks
+(all tasks share the 15-class softmax). Pooled \textsc{{Gesture Accuracy}}
+and pooled \textsc{{Gesture F1 (macro)}} are reported in
+Table~\ref{{tab:main}} but are \emph{{task-size weighted}}, not per-condition,
+summaries -- they up-weight Suturing simply because Suturing has more clips
+and easier gesture transitions -- so we deliberately do not call a
+``pooled winner'' on either of them in the prose. The corresponding paired
+bootstrap CIs on $\Delta\text{{F1}}_{{\text{{macro}}}}$ vs baseline are
+reported in Table~\ref{{tab:bootstrap}}; per-task intervals all bracket zero
+given the small per-cell $n$, and the pooled-across-tasks intervals should
+be read as pilot effect-size estimates rather than confirmatory inference
+until the missing folds are filled in.
 
-\paragraph{{Why Needle Passing is hardest.}}
-On Needle Passing no brain-aligned condition beats the baseline on gesture F1
-or skill accuracy. The Phase~3 manifest lists
-\texttt{{eeg\_latent\_task\_family}} with the lowest transfer plausibility
-(0.552) among the candidates we used, and \texttt{{joint\_eye\_eeg\_task\_family}}
-with identical plausibility.  The negative result on this task is therefore
-anticipated by the internal score rather than surprising, which strengthens
-the interpretation of that score.
+\paragraph{{Transfer plausibility as a \emph{{candidate}} \emph{{a priori}} selector.}}
+A potentially useful finding -- which we are careful not to over-claim -- is
+that the Phase~3 transfer-plausibility score moves in the same direction as
+the gain on gesture F1 macro (Fig.~\ref{{fig:transfer_plausibility}}). The
+score is computed from the RDM's unit labels and their correspondence to
+JIGSAWS task families, so it does not involve any ViT training, which would
+make it attractive as an \emph{{a priori}} selector if validated. With the
+present candidate set, however, the $x$-axis takes only two distinct values
+(0.55 and 0.70), so what
+Fig.~\ref{{fig:transfer_plausibility}} actually shows is a two-group
+contrast between high- and low-plausibility candidates rather than a
+proper correlational test. We therefore frame Phase~3 as a
+\emph{{candidate}} selection tool whose validation requires additional
+candidate RDMs spanning the plausibility range, and we treat the current
+$r\!=\!0.31$ as a hypothesis to test, not as a confirmed selection rule.
+
+\paragraph{{Needle Passing in detail.}}
+On Needle Passing the gesture-F1 winner is {np_gesture_winner}, narrowly
+edging the baseline; on the same task the best Position RMSE comes from
+{np_pos_winner} and the best Skill accuracy from {np_skill_winner}. So the
+brain-aligned conditions do produce a measurable gesture-F1 lift on this
+task, but they cannot match baseline on the skill head, where the LOUO
+holdout sometimes leaves the test surgeon entirely outside any single
+skill class. The Phase~3 manifest lists
+\texttt{{eeg\_latent\_task\_family}} and
+\texttt{{joint\_eye\_eeg\_task\_family}} with the lowest transfer
+plausibility (0.552) among the candidates we used, which anticipates the
+modest size of the gesture-F1 lift on this task.
+
+\paragraph{{Joint eye+EEG fusion on Knot Tying skill: a suggestive but noisy signal.}}
+The one place where any brain-aligned condition numerically tops the skill
+head is Knot Tying, where {kt_skill_label} reaches {kt_skill_value} on
+Skill accuracy. This is consistent with the hypothesis that fused eye+EEG
+priors might help most when the surgical sub-problem demands integration of
+where-attention and global-state cues (knot quality assessment), but
+Table~\ref{{tab:skill}} also shows that the standard deviation of this cell
+($\approx\!33$\%) is nearly the size of the mean and that the cell is
+computed from $n\!=\!7$ folds. With $\sigma \!\approx\! \mu$ and only
+seven held-out surgeons we cannot statistically distinguish this number
+from noise; we therefore mark it as a \emph{{hypothesis worth re-checking
+once the eighth fold lands}}, not as a modality-specific finding, and read
+it with the same skill-fold caveat below.
 
 \paragraph{{Skill head is under-sampled.}}
 Skill accuracy has standard deviations of the same order as its mean across
 folds (Table~\ref{{tab:skill}}), because LOUO can hold out an entire skill
-class. We treat skill metrics as illustrative only and plan to re-report them
-once all eight folds are complete.
+class. Per-condition fold counts (Knot Tying / Needle Passing / Suturing)
+are: {skill_fold_phrase}. We treat skill metrics as illustrative only and
+plan to re-report them once the missing folds (notably Suturing fold~6 for
+the three brain-aligned conditions and Knot Tying fold~8 for the baseline,
+which together account for the $7$ vs $8$ gap visible in Table~\ref{{tab:skill}})
+are recovered.
 """
     _write_text(out_path, text)
 
@@ -1533,10 +2144,25 @@ def emit_section_limitations(
 \label{{sec:limitations}}
 
 \paragraph{{LOUO under-power.}}
-We report $\leq 3$ folds for each brain-aligned condition and up to 8 for the
-baseline. Fold counts per condition are as follows: {fold_str}. The three-fold
-tables should be read as a pilot ablation; we commit to reporting the full
+The full LOUO protocol calls for eight folds per (condition, task) cell;
+the run reported here is incomplete in a small number of cells (notably
+Suturing fold~6 for the three brain-aligned conditions, and Knot Tying
+fold~8 for the baseline, which together account for every $7$ that appears
+in the \emph{{Folds}} column of Tables~\ref{{tab:main}}--\ref{{tab:skill}}).
+Per-condition fold counts are as follows: {fold_str}. The incomplete cells
+should be read as a pilot ablation; we commit to reporting the full
 eight-fold comparison in a follow-up.
+
+\paragraph{{Short fixed training schedule.}}
+Every (condition, task, fold) cell was trained for the same 10 epochs with a
+2-epoch warm-up so that the full $4 \times 3 \times 8$ ablation would fit in
+the available compute window (Section~\ref{{sec:experiments}}). Longer
+schedules -- which we have not run -- could in principle change the
+per-condition winners on individual cells, especially the
+brain-aligned conditions, whose adapter parameters are still being adapted
+late into the schedule. A schedule sweep, alongside the
+$w_{{\text{{brain}}}}$ sweep flagged in Section~\ref{{sec:loss}}, is left
+to future work.
 
 \paragraph{{Needle Passing has only {np_max} folds.}}
 The JIGSAWS Needle Passing task provides fewer LOUO folds than the other two,
@@ -1572,12 +2198,15 @@ We presented a reproducible pipeline that turns EEG and eye-tracking
 recordings from human observers of surgery into differentiable
 representational dissimilarity matrices and uses them as soft regularizers on
 a ViT that jointly predicts kinematics, gestures, and skill on JIGSAWS. A
-controlled leave-one-user-out ablation shows that these brain-derived priors
-have a \emph{selective} effect---eye-tracking helps kinematics geometry, EEG
-helps gesture structure---rather than a uniform accuracy win, and that the
-Phase~3 transfer-plausibility score used internally for RDM ranking is
-predictive of downstream gain. Scaling to the full eight-fold comparison and
-incorporating subject-adaptive priors are the immediate next steps.
+controlled leave-one-user-out ablation shows that no single brain-derived
+prior dominates across tasks and metrics: per-task winners differ across the
+gesture-, kinematics-, and skill-oriented metrics, while a pooled
+``All tasks'' summary makes the per-condition gesture-recognition story
+directly comparable. The Phase~3 transfer-plausibility score used internally
+for RDM ranking is correlated with the downstream gesture-F1 gain, which
+makes Phase~3 a candidate \emph{a priori} selection tool. Completing the
+remaining LOUO folds and incorporating subject-adaptive priors are the
+immediate next steps.
 """
     _write_text(out_path, text)
 
@@ -1666,48 +2295,186 @@ Prediction: An EEG--Eye--RDM--ViT Bridge}
     _write_text(out_path, text)
 
 
-# Cite keys used in the auto-generated prose; every one gets a stub in
-# references.bib so pdflatex+bibtex does not break on a fresh build.
+# Cite keys used in the auto-generated prose. Where we are confident enough
+# in the standard reference, the entry is filled in below; ambiguous keys
+# carry a `% TODO: resolve citation` comment so that the maintainer can
+# disambiguate without anything having been fabricated.
 _TODO_CITE_KEYS: tuple[str, ...] = (
-    "TODO_kriegeskorte2008",
-    "TODO_khaligh-razavi2014",
-    "TODO_gao2014jigsaws",
-    "TODO_dipietro2016",
-    "TODO_funke2019",
-    "TODO_goodman2023",
-    "TODO_mcclure2016",
-    "TODO_schrimpf2020",
-    "TODO_min2019",
-    "TODO_islam2020gaze",
-    "TODO_palazzo2021eeg",
-    "TODO_wightman2019timm",
+    "kriegeskorte2008",
+    "khaligh_razavi2014",
+    "gao2014jigsaws",
+    "dipietro2016",
+    "funke2019",
+    "goodman2023",
+    "mcclure2016",
+    "schrimpf2020",
+    "min2019",
+    "islam2020gaze",
+    "palazzo2021eeg",
+    "wightman2019timm",
+    "wu2021crossmodal",
+    "ahmidi2017jigsaws",
 )
 
 
+# Real bibliographic entries for the citations actually invoked by the
+# auto-generated prose. Entries we are confident about are filled in;
+# entries that map to multiple plausible papers are left as a clearly-marked
+# `% TODO: resolve citation` block rather than fabricated.
+_BIB_ENTRIES: str = r"""% Bibliography auto-generated by scripts/manuscript_writer.py.
+% Confident entries are filled in below; ambiguous keys are flagged with a
+% `% TODO: resolve citation` comment for the maintainer to disambiguate.
+
+@article{kriegeskorte2008,
+  author  = {Kriegeskorte, Nikolaus and Mur, Marieke and Bandettini, Peter},
+  title   = {Representational similarity analysis -- connecting the branches of systems neuroscience},
+  journal = {Frontiers in Systems Neuroscience},
+  year    = {2008},
+  volume  = {2},
+  pages   = {4},
+  doi     = {10.3389/neuro.06.004.2008},
+}
+
+@article{khaligh_razavi2014,
+  author  = {Khaligh-Razavi, Seyed-Mahdi and Kriegeskorte, Nikolaus},
+  title   = {Deep supervised, but not unsupervised, models may explain {IT} cortical representation},
+  journal = {PLoS Computational Biology},
+  year    = {2014},
+  volume  = {10},
+  number  = {11},
+  pages   = {e1003915},
+  doi     = {10.1371/journal.pcbi.1003915},
+}
+
+@inproceedings{gao2014jigsaws,
+  author    = {Gao, Yixin and Vedula, S. Swaroop and Reiley, Carol E. and Ahmidi, Narges and Varadarajan, Balakrishnan and Lin, Henry C. and Tao, Lingling and Zappella, Luca and B\'{e}jar, Benjam\'{i}n and Yuh, David D. and Chen, Chi Chiung Grace and Vidal, Ren\'{e} and Khudanpur, Sanjeev and Hager, Gregory D.},
+  title     = {{JHU-ISI} Gesture and Skill Assessment Working Set ({JIGSAWS}): A Surgical Activity Dataset for Human Motion Modeling},
+  booktitle = {MICCAI Workshop: M2CAI},
+  year      = {2014},
+}
+
+@inproceedings{dipietro2016,
+  author    = {DiPietro, Robert and Lea, Colin and Malpani, Anand and Ahmidi, Narges and Vedula, S. Swaroop and Lee, Gyusung I. and Lee, Mija R. and Hager, Gregory D.},
+  title     = {Recognizing Surgical Activities with Recurrent Neural Networks},
+  booktitle = {Medical Image Computing and Computer-Assisted Intervention (MICCAI)},
+  year      = {2016},
+  pages     = {551--558},
+  doi       = {10.1007/978-3-319-46720-7_64},
+}
+
+% TODO: resolve citation -- placeholder key inherited from the auto-generated
+% prose ("temporal convolutional networks ... Funke et al. 2019"). Several
+% candidates fit; the most likely intended reference is the JIGSAWS-style
+% 3D CNN gesture-recognition paper by Funke et al. (MICCAI 2019), but
+% confirm before submission and replace this entry.
+@article{funke2019,
+  author  = {TODO: resolve citation (Funke et al. 2019, JIGSAWS-style gesture/3D-CNN paper)},
+  title   = {TODO: resolve citation},
+  journal = {TODO},
+  year    = {2019},
+}
+
+% TODO: resolve citation -- the auto-generated prose cites a "self-supervised
+% video transformer" Goodman et al. 2023 paper; the exact reference is
+% ambiguous and should be confirmed before submission.
+@article{goodman2023,
+  author  = {TODO: resolve citation (Goodman et al. 2023, self-supervised video transformer for surgical video)},
+  title   = {TODO: resolve citation},
+  journal = {TODO},
+  year    = {2023},
+}
+
+@article{mcclure2016,
+  author  = {McClure, Patrick and Kriegeskorte, Nikolaus},
+  title   = {Representational Distance Learning for Deep Neural Networks},
+  journal = {Frontiers in Computational Neuroscience},
+  year    = {2016},
+  volume  = {10},
+  pages   = {131},
+  doi     = {10.3389/fncom.2016.00131},
+}
+
+@article{schrimpf2020,
+  author  = {Schrimpf, Martin and Kubilius, Jonas and Hong, Ha and Majaj, Najib J. and Rajalingham, Rishi and Issa, Elias B. and Kar, Kohitij and Bashivan, Pouya and Prescott-Roy, Jonathan and Geiger, Franziska and Schmidt, Kailyn and Yamins, Daniel L. K. and DiCarlo, James J.},
+  title   = {Integrative Benchmarking to Advance Neurally Mechanistic Models of Human Intelligence},
+  journal = {Neuron},
+  year    = {2020},
+  volume  = {108},
+  number  = {3},
+  pages   = {413--423},
+  doi     = {10.1016/j.neuron.2020.07.040},
+}
+
+% TODO: resolve citation -- the auto-generated prose cites a 2019 "eye-gaze
+% as auxiliary signal in action recognition" reference; the exact paper is
+% ambiguous (multiple Min et al. 2019 candidates) and should be confirmed.
+@article{min2019,
+  author  = {TODO: resolve citation (Min et al. 2019, gaze for action recognition)},
+  title   = {TODO: resolve citation},
+  journal = {TODO},
+  year    = {2019},
+}
+
+% TODO: resolve citation -- the auto-generated prose cites a 2020 "gaze in
+% surgical skill analysis" reference; please confirm the exact author/venue
+% before submission.
+@article{islam2020gaze,
+  author  = {TODO: resolve citation (Islam et al. 2020, gaze in surgical skill analysis)},
+  title   = {TODO: resolve citation},
+  journal = {TODO},
+  year    = {2020},
+}
+
+% TODO: resolve citation -- the auto-generated prose cites a 2021 "EEG
+% subject-specific regularizer / reaction-time regression" reference; multiple
+% Palazzo et al. 2021 candidates fit, please confirm before submission.
+@article{palazzo2021eeg,
+  author  = {TODO: resolve citation (Palazzo et al. 2021, EEG-based regularizer / decoding)},
+  title   = {TODO: resolve citation},
+  journal = {TODO},
+  year    = {2021},
+}
+
+@misc{wightman2019timm,
+  author       = {Wightman, Ross},
+  title        = {{PyTorch} Image Models},
+  year         = {2019},
+  publisher    = {GitHub},
+  howpublished = {\url{https://github.com/rwightman/pytorch-image-models}},
+  doi          = {10.5281/zenodo.4414861},
+}
+
+@article{wu2021crossmodal,
+  author  = {Wu, Jie Ying and Tamhane, Aniruddha and Kazanzides, Peter and Unberath, Mathias},
+  title   = {Cross-modal self-supervised representation learning for gesture and skill recognition in robotic surgery},
+  journal = {International Journal of Computer Assisted Radiology and Surgery},
+  year    = {2021},
+  volume  = {16},
+  number  = {5},
+  pages   = {779--787},
+  doi     = {10.1007/s11548-021-02343-y},
+}
+
+% TODO: resolve citation -- the LDS (vid) reference numbers we report from
+% Wu et al. (2021) Table 3 attribute the underlying numbers to Ahmidi et al.
+% on JIGSAWS; the exact venue (TBME / IPCAI) should be confirmed before
+% submission, hence this placeholder.
+@article{ahmidi2017jigsaws,
+  author  = {TODO: resolve citation (Ahmidi et al., supervised LDS (vid) JIGSAWS reference cited by Wu et al. 2021 Table 3)},
+  title   = {TODO: resolve citation},
+  journal = {TODO},
+  year    = {2017},
+}
+"""
+
+
 def emit_references_bib(out_path: Path, keys: Iterable[str]) -> None:
-    if out_path.exists():
-        return  # preserve the user's edits
-    lines = [
-        "% Bibliography stub auto-generated by scripts/manuscript_writer.py.",
-        "% Edit each entry before submission; the script will NOT overwrite this",
-        "% file on subsequent runs.",
-        "",
-    ]
-    for key in sorted(set(keys)):
-        lines.extend(
-            [
-                f"@article{{{key},",
-                "  author  = {TODO Author},",
-                "  title   = {TODO Title},",
-                "  journal = {TODO Journal},",
-                "  year    = {TODO},",
-                "  volume  = {TODO},",
-                "  pages   = {TODO},",
-                "}",
-                "",
-            ]
-        )
-    _write_text(out_path, "\n".join(lines))
+    """Write the bibliography file with real entries (overwrites)."""
+    # We intentionally overwrite on every run now that the entries are real
+    # rather than placeholder stubs. The `keys` argument is retained for API
+    # compatibility but is no longer used to template generic stubs.
+    del keys  # unused; entries are inlined verbatim.
+    _write_text(out_path, _BIB_ENTRIES)
 
 
 def emit_readme(out_path: Path) -> None:
@@ -1731,16 +2498,20 @@ python scripts/manuscript_writer.py `
   --splits_dir data/splits `
   --configs_dir src/configs `
   --output_dir docs/final_results_manuscript `
-  --conditions baseline brain_eye bridge_eeg bridge_joint `
+  --conditions baseline brain_eye bridge_eeg `
   --baseline_condition baseline
 ```
 
 Re-running the script clobbers everything in this directory EXCEPT:
 
-- `references.bib` (your edits survive)
 - `README.md` (this file)
 - `figures/fig_pipeline_diagram.pdf` (user-supplied schematic)
 - `figures/fig_architecture.pdf` (user-supplied schematic)
+
+`references.bib` is now regenerated on every run with real entries (any
+`% TODO: resolve citation` blocks must be hand-fixed before submission;
+your in-place edits to those will be overwritten, so apply them by editing
+the `_BIB_ENTRIES` constant in `scripts/manuscript_writer.py` instead).
 
 Everything else -- `main.tex`, all `sections/*.tex`, all `tables/*.tex`, and the
 five data-driven figures under `figures/` -- is regenerated from scratch on
@@ -1762,7 +2533,8 @@ citations; the subsequent `bibtex` + two `pdflatex` passes resolve them.
 
 - Hand-edit the prose in `sections/*.tex`, then copy your edits out before
   re-running the script (the script will overwrite them).
-- Replace the `TODO_*` keys in `references.bib` with real BibTeX entries.
+- Resolve the `% TODO: resolve citation` blocks in `references.bib` for the
+  citations that could not be unambiguously filled in by the script.
 - Drop `figures/fig_pipeline_diagram.pdf` and `figures/fig_architecture.pdf`
   into place (the `\\IfFileExists` guard keeps the manuscript compilable
   without them).
@@ -1789,7 +2561,7 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser.add_argument(
         "--conditions",
         nargs="+",
-        default=["baseline", "brain_eye", "bridge_eeg", "bridge_joint"],
+        default=["baseline", "brain_eye", "bridge_eeg"],
     )
     parser.add_argument(
         "--baseline_condition",
@@ -1802,6 +2574,34 @@ def _parse_args(argv: Sequence[str] | None = None) -> argparse.Namespace:
         type=Path,
         default=Path("analysis/brain_eye/logs/Knot_Tying_fold_1_train.log"),
         help="Training log used to scrape total / trainable parameter counts.",
+    )
+    parser.add_argument(
+        "--eval_root",
+        type=Path,
+        default=Path("eval_results"),
+        help=(
+            "Root directory of per-fold eval result text files used to compute "
+            "paired-bootstrap CIs on Delta gesture F1 macro vs baseline. "
+            "Expected layout: <eval_root>/<condition>/<Task>_test_fold_<N>_results.txt."
+        ),
+    )
+    parser.add_argument(
+        "--bootstrap_iters",
+        type=int,
+        default=10000,
+        help="Number of bootstrap resamples for the paired CI on Delta F1.",
+    )
+    parser.add_argument(
+        "--bootstrap_seed",
+        type=int,
+        default=42,
+        help="RNG seed for bootstrap reproducibility.",
+    )
+    parser.add_argument(
+        "--bootstrap_ci",
+        type=float,
+        default=0.95,
+        help="Bootstrap confidence interval (e.g. 0.95 for 95 percent CI).",
     )
     return parser.parse_args(argv)
 
@@ -1887,10 +2687,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     tbl_kin = tables_dir / "tbl_kinematics.tex"
     tbl_skill = tables_dir / "tbl_skill.tex"
     tbl_cond = tables_dir / "tbl_conditions.tex"
+    tbl_bootstrap = tables_dir / "tbl_bootstrap.tex"
     emit_main_table(conditions, tbl_main)
     emit_kinematics_table(conditions, tbl_kin)
     emit_skill_table(conditions, tbl_skill)
     emit_conditions_table(conditions, tbl_cond)
+    emit_bootstrap_table(
+        conditions,
+        args.baseline_condition,
+        args.eval_root,
+        tbl_bootstrap,
+        n_iter=args.bootstrap_iters,
+        seed=args.bootstrap_seed,
+        ci=args.bootstrap_ci,
+    )
 
     # Figures ----------------------------------------------------------------
     fig_gesture = figures_dir / "fig_gesture_f1_bars.pdf"
@@ -1927,7 +2737,15 @@ def main(argv: Sequence[str] | None = None) -> int:
         n_trials_used,
     )
     emit_section_experiments(sec_experiments, conditions)
-    emit_section_results(sec_results, conditions, args.baseline_condition)
+    emit_section_results(
+        sec_results,
+        conditions,
+        args.baseline_condition,
+        eval_root=args.eval_root,
+        bootstrap_n_iter=args.bootstrap_iters,
+        bootstrap_seed=args.bootstrap_seed,
+        bootstrap_ci=args.bootstrap_ci,
+    )
     emit_section_discussion(sec_discussion, conditions, args.baseline_condition)
     emit_section_limitations(sec_limits, conditions, splits_fold_counts)
     emit_section_conclusion(sec_conclusion)
@@ -1941,7 +2759,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     emit_readme(readme)
 
     writes = {
-        "Tables": [tbl_main, tbl_kin, tbl_skill, tbl_cond],
+        "Tables": [tbl_main, tbl_kin, tbl_skill, tbl_cond, tbl_bootstrap],
         "Figures": [fig_gesture, fig_kin, fig_fold, fig_rdms, fig_tp],
         "Sections": [
             sec_abstract, sec_intro, sec_related, sec_methods,

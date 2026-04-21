@@ -1,6 +1,6 @@
 Use the following prompt in a future session to run the full ablation pipeline:
 
-Run `.\run_ablation_study.ps1 -Conditions brain_eye,bridge_eeg,bridge_joint -RetainCheckpoints none` from the repo root in PowerShell.
+Run `.\run_ablation_study.ps1 -Conditions baseline -RetainCheckpoints none` from the repo root in PowerShell.
 
 Useful variations:
 - Smoke test one fold/task per condition: `.\run_ablation_study.ps1 -Conditions baseline,brain_eye -Tasks Suturing -StartFold 1 -EndFold 1 -RetainCheckpoints none`

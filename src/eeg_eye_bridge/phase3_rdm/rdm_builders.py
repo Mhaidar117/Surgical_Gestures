@@ -145,6 +145,28 @@ def eeg_latent_task_family(
     )
 
 
+def eeg_latent_subskill_family(
+    records: Sequence[TrialRecord],
+    metric: str = "one_minus_spearman",
+) -> RDMArtifact:
+    labs, X = aggregate_feature_matrix(
+        records,
+        lambda r: subskill_family(r.task_id),
+        lambda r: r.latent_summary,
+    )
+    mat = compute_rdm(X, metric)
+    return build_rdm_artifact(
+        "eeg_latent_subskill_family",
+        "eeg_latent",
+        "subskill_family",
+        labs,
+        mat,
+        metric,
+        "eeg_latent_summary",
+        {"abstraction": "subskill_family"},
+    )
+
+
 def eeg_pred_error_task_family(
     records: Sequence[TrialRecord],
     metric: str = "one_minus_spearman",

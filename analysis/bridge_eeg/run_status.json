@@ -1,13 +1,53 @@
 ﻿[
     {
         "condition":  "bridge_eeg",
-        "task":  "Suturing",
-        "fold":  "fold_2",
+        "task":  "all",
+        "fold":  "fold_1",
         "stage":  "train",
         "status":  "failed_other",
-        "error_message":  "    Gesture Loss: 0.619440\n    Skill Loss: 0.015037\n  [VAL]\n    Total Loss: 2.220998\n    Kinematics Loss: 0.041853\n      - Position: 0.105710\n      - Rotation: 2.917942 (167.19░)\n      - Jaw: 0.041853\n    Gesture Loss: 1.905585\n    Skill Loss: 0.547121\n  Learning Rate: 0.000001\n  Checkpoint saved: checkpoints\\bridge_eeg\\Suturing\\fold_2\\checkpoint_epoch_10.pth\n\n============================================================\nTraining Complete!\n============================================================\nTask: Suturing\nSplit: fold_2\nFinal model saved to: checkpoints\\bridge_eeg\\Suturing\\fold_2\\final_model.pth\nBest model (epoch 8, val_loss: 2.220602): checkpoints\\bridge_eeg\\Suturing\\fold_2\\best_model.pth",
-        "log_path":  "analysis\\bridge_eeg\\logs\\Suturing_fold_2_train.log",
-        "timestamp":  "2026-04-17T18:48:23-07:00"
+        "error_message":  "    Skill Loss: 0.010056\n    Brain RSA Loss: 1.529102 (corr: -0.5291)\n  [VAL]\n    Total Loss: 3.853913\n    Kinematics Loss: 0.015459\n      - Position: 0.130389\n      - Rotation: 1.811816 (103.81░)\n      - Jaw: 0.015459\n    Gesture Loss: 1.580409\n    Skill Loss: 4.516090\n  Learning Rate: 0.000001\n  Checkpoint saved: checkpoints\\bridge_eeg\\all\\fold_1\\checkpoint_epoch_10.pth\n\n============================================================\nTraining Complete!\n============================================================\nTask: all\nSplit: fold_1\nFinal model saved to: checkpoints\\bridge_eeg\\all\\fold_1\\final_model.pth\nBest model (epoch 2, val_loss: 2.735076): checkpoints\\bridge_eeg\\all\\fold_1\\best_model.pth",
+        "log_path":  "analysis\\bridge_eeg\\logs\\all_fold_1_train.log",
+        "timestamp":  "2026-04-21T06:13:39-07:00"
+    },
+    {
+        "condition":  "bridge_eeg",
+        "task":  "Suturing",
+        "fold":  "fold_1",
+        "stage":  "eval",
+        "status":  "completed",
+        "error_message":  "",
+        "log_path":  "analysis\\bridge_eeg\\logs\\Suturing_fold_1_eval.log",
+        "timestamp":  "2026-04-21T06:14:40-07:00"
+    },
+    {
+        "condition":  "bridge_eeg",
+        "task":  "Needle_Passing",
+        "fold":  "fold_1",
+        "stage":  "eval",
+        "status":  "completed",
+        "error_message":  "",
+        "log_path":  "analysis\\bridge_eeg\\logs\\Needle_Passing_fold_1_eval.log",
+        "timestamp":  "2026-04-21T06:15:24-07:00"
+    },
+    {
+        "condition":  "bridge_eeg",
+        "task":  "Knot_Tying",
+        "fold":  "fold_1",
+        "stage":  "eval",
+        "status":  "completed",
+        "error_message":  "",
+        "log_path":  "analysis\\bridge_eeg\\logs\\Knot_Tying_fold_1_eval.log",
+        "timestamp":  "2026-04-21T06:15:50-07:00"
+    },
+    {
+        "condition":  "bridge_eeg",
+        "task":  "all",
+        "fold":  "fold_2",
+        "stage":  "train",
+        "status":  "completed",
+        "error_message":  "",
+        "log_path":  "analysis\\bridge_eeg\\logs\\all_fold_2_train.log",
+        "timestamp":  "2026-04-21T07:55:14-07:00"
     },
     {
         "condition":  "bridge_eeg",
@@ -17,37 +57,7 @@
         "status":  "completed",
         "error_message":  "",
         "log_path":  "analysis\\bridge_eeg\\logs\\Suturing_fold_2_eval.log",
-        "timestamp":  "2026-04-17T18:49:15-07:00"
-    },
-    {
-        "condition":  "bridge_eeg",
-        "task":  "Suturing",
-        "fold":  "fold_3",
-        "stage":  "train",
-        "status":  "completed",
-        "error_message":  "",
-        "log_path":  "analysis\\bridge_eeg\\logs\\Suturing_fold_3_train.log",
-        "timestamp":  "2026-04-17T19:36:50-07:00"
-    },
-    {
-        "condition":  "bridge_eeg",
-        "task":  "Suturing",
-        "fold":  "fold_3",
-        "stage":  "eval",
-        "status":  "completed",
-        "error_message":  "",
-        "log_path":  "analysis\\bridge_eeg\\logs\\Suturing_fold_3_eval.log",
-        "timestamp":  "2026-04-17T19:37:37-07:00"
-    },
-    {
-        "condition":  "bridge_eeg",
-        "task":  "Needle_Passing",
-        "fold":  "fold_2",
-        "stage":  "train",
-        "status":  "completed",
-        "error_message":  "",
-        "log_path":  "analysis\\bridge_eeg\\logs\\Needle_Passing_fold_2_train.log",
-        "timestamp":  "2026-04-17T20:05:44-07:00"
+        "timestamp":  "2026-04-21T07:56:10-07:00"
     },
     {
         "condition":  "bridge_eeg",
@@ -57,37 +67,7 @@
         "status":  "completed",
         "error_message":  "",
         "log_path":  "analysis\\bridge_eeg\\logs\\Needle_Passing_fold_2_eval.log",
-        "timestamp":  "2026-04-17T20:06:40-07:00"
-    },
-    {
-        "condition":  "bridge_eeg",
-        "task":  "Needle_Passing",
-        "fold":  "fold_3",
-        "stage":  "train",
-        "status":  "completed",
-        "error_message":  "",
-        "log_path":  "analysis\\bridge_eeg\\logs\\Needle_Passing_fold_3_train.log",
-        "timestamp":  "2026-04-17T20:34:52-07:00"
-    },
-    {
-        "condition":  "bridge_eeg",
-        "task":  "Needle_Passing",
-        "fold":  "fold_3",
-        "stage":  "eval",
-        "status":  "completed",
-        "error_message":  "",
-        "log_path":  "analysis\\bridge_eeg\\logs\\Needle_Passing_fold_3_eval.log",
-        "timestamp":  "2026-04-17T20:35:48-07:00"
-    },
-    {
-        "condition":  "bridge_eeg",
-        "task":  "Knot_Tying",
-        "fold":  "fold_2",
-        "stage":  "train",
-        "status":  "completed",
-        "error_message":  "",
-        "log_path":  "analysis\\bridge_eeg\\logs\\Knot_Tying_fold_2_train.log",
-        "timestamp":  "2026-04-17T20:54:02-07:00"
+        "timestamp":  "2026-04-21T07:57:10-07:00"
     },
     {
         "condition":  "bridge_eeg",
@@ -97,17 +77,37 @@
         "status":  "completed",
         "error_message":  "",
         "log_path":  "analysis\\bridge_eeg\\logs\\Knot_Tying_fold_2_eval.log",
-        "timestamp":  "2026-04-17T20:54:29-07:00"
+        "timestamp":  "2026-04-21T07:57:39-07:00"
     },
     {
         "condition":  "bridge_eeg",
-        "task":  "Knot_Tying",
+        "task":  "all",
         "fold":  "fold_3",
         "stage":  "train",
         "status":  "completed",
         "error_message":  "",
-        "log_path":  "analysis\\bridge_eeg\\logs\\Knot_Tying_fold_3_train.log",
-        "timestamp":  "2026-04-17T21:12:31-07:00"
+        "log_path":  "analysis\\bridge_eeg\\logs\\all_fold_3_train.log",
+        "timestamp":  "2026-04-21T09:39:41-07:00"
+    },
+    {
+        "condition":  "bridge_eeg",
+        "task":  "Suturing",
+        "fold":  "fold_3",
+        "stage":  "eval",
+        "status":  "completed",
+        "error_message":  "",
+        "log_path":  "analysis\\bridge_eeg\\logs\\Suturing_fold_3_eval.log",
+        "timestamp":  "2026-04-21T09:40:33-07:00"
+    },
+    {
+        "condition":  "bridge_eeg",
+        "task":  "Needle_Passing",
+        "fold":  "fold_3",
+        "stage":  "eval",
+        "status":  "completed",
+        "error_message":  "",
+        "log_path":  "analysis\\bridge_eeg\\logs\\Needle_Passing_fold_3_eval.log",
+        "timestamp":  "2026-04-21T09:41:34-07:00"
     },
     {
         "condition":  "bridge_eeg",
@@ -117,16 +117,6 @@
         "status":  "completed",
         "error_message":  "",
         "log_path":  "analysis\\bridge_eeg\\logs\\Knot_Tying_fold_3_eval.log",
-        "timestamp":  "2026-04-17T21:12:59-07:00"
-    },
-    {
-        "condition":  "bridge_eeg",
-        "task":  "*",
-        "fold":  "*",
-        "stage":  "aggregate",
-        "status":  "completed",
-        "error_message":  "",
-        "log_path":  "analysis\\bridge_eeg\\logs\\aggregate.log",
-        "timestamp":  "2026-04-17T21:13:00-07:00"
+        "timestamp":  "2026-04-21T09:42:05-07:00"
     }
 ]

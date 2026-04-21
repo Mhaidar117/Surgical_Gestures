@@ -30,9 +30,14 @@ brain_layer: mid
 
 bridge:
   manifest_path: cache/eeg_eye_bridge/phase3/rdm_manifest.json
-  target_key: joint_eye_eeg_task_family
+  target_key: joint_eye_eeg_subskill_family
 
-bridge_grouping: task
+bridge_grouping: subskill
+# Map each JIGSAWS gesture index (G1..G15 -> 0..14) to a subskill family id.
+# Family ids match labels_sorted order of the 3x3 target:
+#   0 = needle_control, 1 = needle_driving, 2 = other
+# Source: src/data/jigsaws_vit_dataset.py::_get_gesture_label (G1=0..G15=14)
+gesture_to_subskill_family: [0, 0, 1, 0, 0, 2, 2, 0, 2, 2, 2, 0, 2, 2, 2]
 
 d_kin_input: 19
 d_kin_output: 19

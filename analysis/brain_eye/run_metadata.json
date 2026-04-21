@@ -7,15 +7,17 @@
                   "Knot_Tying"
               ],
     "folds":  [
+                  1,
                   2,
-                  3
+                  3,
+                  4
               ],
-    "timestamp":  "2026-04-17T14:49:18-07:00",
+    "timestamp":  "2026-04-20T22:00:33-07:00",
     "data_root":  ".",
     "checkpoint_root":  "checkpoints",
     "eval_root":  "eval_results\\brain_eye",
     "analysis_root":  "analysis\\brain_eye",
-    "retain_checkpoints":  "none",
+    "retain_checkpoints":  "best",
     "arm":  "PSM2",
     "dry_run":  false,
     "runner_script":  "run_ablation_study.ps1",

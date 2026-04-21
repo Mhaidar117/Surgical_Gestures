@@ -318,6 +318,14 @@ def train_epoch(
                 task_labels_expanded = task_labels.unsqueeze(1).expand(-1, T).reshape(B * T)
                 model_rdm = compute_task_centroid_rdm(embeddings_flat, task_labels_expanded)
                 eeg_rdm = target_rdm.to(device)
+                if not config.get('_brain_branch_fired', False):
+                    print(
+                        f"\n[brain] active branch fired (mode=eye, "
+                        f"model_rdm shape={tuple(model_rdm.shape)}, "
+                        f"target shape={tuple(eeg_rdm.shape)})",
+                        flush=True,
+                    )
+                    config['_brain_branch_fired'] = True
         elif (
             brain_mode == 'bridge'
             and target_rdm is not None
@@ -373,6 +381,15 @@ def train_epoch(
                     )
                     model_rdm = None
                     eeg_rdm = None
+                elif not config.get('_brain_branch_fired', False):
+                    print(
+                        f"\n[brain] active branch fired (mode=bridge, grouping={grouping}, "
+                        f"model_rdm shape={tuple(model_rdm.shape)}, "
+                        f"target shape={tuple(eeg_rdm.shape)}, "
+                        f"num_groups_present={int(group_labels.unique().numel())})",
+                        flush=True,
+                    )
+                    config['_brain_branch_fired'] = True
         elif brain_mode == 'rsa' and 'embeddings' in outputs and model.brain_rdm is not None:
             # EEG RSA: sample features for RDM
             features = outputs['embeddings'].get('mid', outputs['memory'])
@@ -609,6 +626,19 @@ def main():
         print(
             f"  Bridge target {bt.name!r}: K={bt.num_groups}, unit_type={bt.unit_type!r}"
         )
+        # Hard assertion: bridge grouping (task or subskill) must match a 3x3 target
+        # so the model centroid RDM and the target RDM align. Fails LOUDLY at startup
+        # instead of silently zero-padding centroids at batch time.
+        bridge_grouping = config.get('bridge_grouping', 'task')
+        if bridge_grouping in ('task', 'subskill'):
+            if target_rdm.shape != (3, 3):
+                raise ValueError(
+                    f"bridge_grouping={bridge_grouping!r} requires a 3x3 target RDM, "
+                    f"but target_key={target_key!r} produced shape {tuple(target_rdm.shape)}. "
+                    "Pick a 3x3 manifest entry (e.g. eeg_latent_subskill_family, "
+                    "eye_only_subskill_family, joint_eye_eeg_subskill_family) or change "
+                    "bridge_grouping."
+                )
 
     # Create dataset
     use_multi_task = args.task.lower() == 'all'
@@ -632,10 +662,10 @@ def main():
         print(f"  - Val samples: {len(val_dataset)}")
 
         batch_size = config.get('batch_size', 16)
-        use_balanced_tasks = config.get('brain_mode') == 'eye' or (
-            config.get('brain_mode') == 'bridge'
-            and config.get('bridge_grouping', 'task') == 'task'
-        )
+        # Force balanced-task sampling for any brain_mode so every batch contains all
+        # three JIGSAWS tasks. For subskill grouping this is what gives enough family
+        # coverage per batch to avoid empty-centroid zero-fills in compute_centroid_rdm.
+        use_balanced_tasks = config.get('brain_mode') in ('eye', 'bridge')
         if use_balanced_tasks:
             task_labels = train_dataset.task_labels
             batch_sampler = BalancedTaskBatchSampler(

@@ -2,62 +2,82 @@
     {
         "condition":  "baseline",
         "task":  "Knot_Tying",
-        "fold":  "fold_1",
+        "fold":  "fold_4",
         "stage":  "train",
         "status":  "failed_other",
-        "error_message":  "    Gesture Loss: 0.956343\n    Skill Loss: 0.223489\n  [VAL]\n    Total Loss: 3.063767\n    Kinematics Loss: 0.026529\n      - Position: 0.111156\n      - Rotation: 1.591190 (91.17░)\n      - Jaw: 0.026529\n    Gesture Loss: 1.814473\n    Skill Loss: 2.445530\n  Learning Rate: 0.000001\n  Checkpoint saved: checkpoints\\baseline\\Knot_Tying\\fold_1\\checkpoint_epoch_10.pth\n\n============================================================\nTraining Complete!\n============================================================\nTask: Knot_Tying\nSplit: fold_1\nFinal model saved to: checkpoints\\baseline\\Knot_Tying\\fold_1\\final_model.pth\nBest model (epoch 5, val_loss: 2.801321): checkpoints\\baseline\\Knot_Tying\\fold_1\\best_model.pth",
-        "log_path":  "analysis\\baseline\\logs\\Knot_Tying_fold_1_train.log",
-        "timestamp":  "2026-04-17T13:38:48-07:00"
+        "error_message":  "    Gesture Loss: 0.896251\n    Skill Loss: 0.065293\n  [VAL]\n    Total Loss: 3.272692\n    Kinematics Loss: 0.027079\n      - Position: 0.099557\n      - Rotation: 1.919272 (109.97░)\n      - Jaw: 0.027079\n    Gesture Loss: 1.661120\n    Skill Loss: 3.168985\n  Learning Rate: 0.000001\n  Checkpoint saved: checkpoints\\baseline\\Knot_Tying\\fold_4\\checkpoint_epoch_10.pth\n\n============================================================\nTraining Complete!\n============================================================\nTask: Knot_Tying\nSplit: fold_4\nFinal model saved to: checkpoints\\baseline\\Knot_Tying\\fold_4\\final_model.pth\nBest model (epoch 2, val_loss: 2.766151): checkpoints\\baseline\\Knot_Tying\\fold_4\\best_model.pth",
+        "log_path":  "analysis\\baseline\\logs\\Knot_Tying_fold_4_train.log",
+        "timestamp":  "2026-04-19T14:25:44-07:00"
     },
     {
         "condition":  "baseline",
         "task":  "Knot_Tying",
-        "fold":  "fold_1",
+        "fold":  "fold_4",
         "stage":  "eval",
         "status":  "completed",
         "error_message":  "",
-        "log_path":  "analysis\\baseline\\logs\\Knot_Tying_fold_1_eval.log",
-        "timestamp":  "2026-04-17T13:39:15-07:00"
+        "log_path":  "analysis\\baseline\\logs\\Knot_Tying_fold_4_eval.log",
+        "timestamp":  "2026-04-19T14:26:16-07:00"
     },
     {
         "condition":  "baseline",
         "task":  "Knot_Tying",
-        "fold":  "fold_2",
+        "fold":  "fold_5",
         "stage":  "train",
         "status":  "completed",
         "error_message":  "",
-        "log_path":  "analysis\\baseline\\logs\\Knot_Tying_fold_2_train.log",
-        "timestamp":  "2026-04-17T13:57:13-07:00"
+        "log_path":  "analysis\\baseline\\logs\\Knot_Tying_fold_5_train.log",
+        "timestamp":  "2026-04-19T14:46:45-07:00"
     },
     {
         "condition":  "baseline",
         "task":  "Knot_Tying",
-        "fold":  "fold_2",
+        "fold":  "fold_5",
         "stage":  "eval",
         "status":  "completed",
         "error_message":  "",
-        "log_path":  "analysis\\baseline\\logs\\Knot_Tying_fold_2_eval.log",
-        "timestamp":  "2026-04-17T13:57:40-07:00"
+        "log_path":  "analysis\\baseline\\logs\\Knot_Tying_fold_5_eval.log",
+        "timestamp":  "2026-04-19T14:47:16-07:00"
     },
     {
         "condition":  "baseline",
         "task":  "Knot_Tying",
-        "fold":  "fold_3",
+        "fold":  "fold_6",
         "stage":  "train",
         "status":  "completed",
         "error_message":  "",
-        "log_path":  "analysis\\baseline\\logs\\Knot_Tying_fold_3_train.log",
-        "timestamp":  "2026-04-17T14:15:27-07:00"
+        "log_path":  "analysis\\baseline\\logs\\Knot_Tying_fold_6_train.log",
+        "timestamp":  "2026-04-19T15:07:48-07:00"
     },
     {
         "condition":  "baseline",
         "task":  "Knot_Tying",
-        "fold":  "fold_3",
+        "fold":  "fold_6",
         "stage":  "eval",
         "status":  "completed",
         "error_message":  "",
-        "log_path":  "analysis\\baseline\\logs\\Knot_Tying_fold_3_eval.log",
-        "timestamp":  "2026-04-17T14:15:54-07:00"
+        "log_path":  "analysis\\baseline\\logs\\Knot_Tying_fold_6_eval.log",
+        "timestamp":  "2026-04-19T15:08:18-07:00"
+    },
+    {
+        "condition":  "baseline",
+        "task":  "Knot_Tying",
+        "fold":  "fold_7",
+        "stage":  "train",
+        "status":  "completed",
+        "error_message":  "",
+        "log_path":  "analysis\\baseline\\logs\\Knot_Tying_fold_7_train.log",
+        "timestamp":  "2026-04-19T15:28:57-07:00"
+    },
+    {
+        "condition":  "baseline",
+        "task":  "Knot_Tying",
+        "fold":  "fold_7",
+        "stage":  "eval",
+        "status":  "completed",
+        "error_message":  "",
+        "log_path":  "analysis\\baseline\\logs\\Knot_Tying_fold_7_eval.log",
+        "timestamp":  "2026-04-19T15:29:21-07:00"
     },
     {
         "condition":  "baseline",
@@ -67,6 +87,6 @@
         "status":  "completed",
         "error_message":  "",
         "log_path":  "analysis\\baseline\\logs\\aggregate.log",
-        "timestamp":  "2026-04-17T14:15:55-07:00"
+        "timestamp":  "2026-04-19T15:29:22-07:00"
     }
 ]
