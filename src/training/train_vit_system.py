@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from models.visual import ViTFrameEncoder
 from models.temporal_transformer import TemporalAggregatorWithPooling
 from models.kinematics import KinematicsModule
-from models.losses import compute_total_loss
+from models.losses import compute_total_loss, surgeon_ids_from_trial_ids
 from modules.brain_rdm import (
     BrainRDM,
     compute_model_rdm,
@@ -258,7 +258,7 @@ def train_epoch(
     component_losses = {}
     num_batches = 0
     brain_mode = config.get('brain_mode', 'none')
-    use_embeddings = brain_mode in ('rsa', 'eye', 'bridge')
+    use_embeddings = brain_mode in ('rsa', 'eye', 'bridge', 'kinematics_rsa')
     
     # Create progress bar
     pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}", leave=False)
@@ -390,6 +390,28 @@ def train_epoch(
                         flush=True,
                     )
                     config['_brain_branch_fired'] = True
+        elif brain_mode == 'kinematics_rsa' and 'memory' in outputs:
+            # Stimulus-locked teacher signal: align per-sample video embedding
+            # geometry with per-sample kinematic-trajectory geometry within the
+            # same batch. Each sample = one gesture segment. Same subject, same
+            # moment, two representations of the same act.
+            from modules.brain_rdm import (
+                pairwise_distance_rdm,
+                kinematics_trajectory_features,
+            )
+            memory = outputs['memory']  # (B, T, D)
+            model_emb = memory.mean(dim=1)  # (B, D)
+            kin_feat = kinematics_trajectory_features(kinematics)  # (B, 2K)
+            model_rdm = pairwise_distance_rdm(model_emb)
+            eeg_rdm = pairwise_distance_rdm(kin_feat).detach()
+            if not config.get('_brain_branch_fired', False):
+                print(
+                    f"\n[brain] active branch fired (mode=kinematics_rsa, "
+                    f"B={model_emb.shape[0]}, D={model_emb.shape[1]}, "
+                    f"kin_feat_dim={kin_feat.shape[-1]})",
+                    flush=True,
+                )
+                config['_brain_branch_fired'] = True
         elif brain_mode == 'rsa' and 'embeddings' in outputs and model.brain_rdm is not None:
             # EEG RSA: sample features for RDM
             features = outputs['embeddings'].get('mid', outputs['memory'])
@@ -404,6 +426,17 @@ def train_epoch(
         d_kin_output = config.get('d_kin_output', 19)
         kin_format = '19d' if d_kin_output == 19 else '10d'
 
+        # Surgeon-conditioned skill-contrastive inputs (only materialized if the
+        # weight is >0; otherwise compute_total_loss ignores them).
+        skill_contra_weight = (config.get('loss_weights') or {}).get('skill_contra', 0.0)
+        skill_embeddings = None
+        surgeon_ids = None
+        if skill_contra_weight and 'memory' in outputs:
+            skill_embeddings = outputs['memory'].mean(dim=1)
+            trial_ids = batch.get('trial_id', [])
+            if isinstance(trial_ids, (list, tuple)):
+                surgeon_ids = surgeon_ids_from_trial_ids(list(trial_ids))
+
         # Compute loss
         loss, losses = compute_total_loss(
             outputs['kinematics'],
@@ -416,7 +449,10 @@ def train_epoch(
             eeg_rdm=eeg_rdm,
             brain_mode=config.get('brain_mode', 'none'),
             loss_weights=config.get('loss_weights'),
-            kinematics_format=kin_format
+            kinematics_format=kin_format,
+            skill_embeddings=skill_embeddings,
+            surgeon_ids=surgeon_ids,
+            skill_contra_temperature=config.get('skill_contra_temperature', 0.07),
         )
         
         # Backward pass
@@ -453,11 +489,21 @@ def validate_epoch(
     device: torch.device,
     config: Dict
 ) -> Dict[str, float]:
-    """Validate for one epoch."""
+    """Validate for one epoch.
+
+    Mirrors the kinematics_rsa + skill_contra branches from ``train_epoch`` so
+    the reported val component losses include brain_rsa / skill_contra when the
+    corresponding config weights are nonzero. The eye/bridge brain modes are
+    not replicated here (they rely on task_label expansion and a preloaded
+    target RDM; add if you need val-side tracking).
+    """
     model.eval()
     total_loss = 0.0
     component_losses = {}
     num_batches = 0
+    brain_mode = config.get('brain_mode', 'none')
+    skill_contra_weight = (config.get('loss_weights') or {}).get('skill_contra', 0.0)
+    return_embeddings = brain_mode in ('kinematics_rsa',) or skill_contra_weight > 0
 
     with torch.no_grad():
         pbar = tqdm(dataloader, desc="Validating", leave=False)
@@ -473,12 +519,34 @@ def validate_epoch(
             outputs = model(
                 rgb,
                 target_kinematics=kinematics,
-                teacher_forcing_prob=0.0
+                teacher_forcing_prob=0.0,
+                return_embeddings=return_embeddings,
             )
 
             # Determine kinematics format based on output dimension
             d_kin_output = config.get('d_kin_output', 19)
             kin_format = '19d' if d_kin_output == 19 else '10d'
+
+            model_rdm = None
+            eeg_rdm = None
+            skill_embeddings = None
+            surgeon_ids = None
+
+            if brain_mode == 'kinematics_rsa' and 'memory' in outputs:
+                from modules.brain_rdm import (
+                    pairwise_distance_rdm,
+                    kinematics_trajectory_features,
+                )
+                model_emb = outputs['memory'].mean(dim=1)
+                kin_feat = kinematics_trajectory_features(kinematics)
+                model_rdm = pairwise_distance_rdm(model_emb)
+                eeg_rdm = pairwise_distance_rdm(kin_feat).detach()
+
+            if skill_contra_weight and 'memory' in outputs:
+                skill_embeddings = outputs['memory'].mean(dim=1)
+                trial_ids = batch.get('trial_id', [])
+                if isinstance(trial_ids, (list, tuple)):
+                    surgeon_ids = surgeon_ids_from_trial_ids(list(trial_ids))
 
             # Compute loss
             loss, losses = compute_total_loss(
@@ -488,8 +556,14 @@ def validate_epoch(
                 gesture_labels,
                 outputs['skill_logits'],
                 skill_labels,
+                model_rdm=model_rdm,
+                eeg_rdm=eeg_rdm,
+                brain_mode=brain_mode,
                 loss_weights=config.get('loss_weights'),
-                kinematics_format=kin_format
+                kinematics_format=kin_format,
+                skill_embeddings=skill_embeddings,
+                surgeon_ids=surgeon_ids,
+                skill_contra_temperature=config.get('skill_contra_temperature', 0.07),
             )
 
             # Accumulate losses
@@ -511,16 +585,39 @@ def validate_epoch(
 
 def filter_dataset_by_trials(
     dataset: JIGSAWSViTDataset,
-    trial_ids: List[str]
+    trial_ids: List[str],
+    segment_filter: Optional[Dict[str, Dict]] = None,
 ) -> Subset:
-    """Filter dataset to only include samples from specific trials."""
+    """Filter dataset to only include samples from specific trials.
+
+    If ``segment_filter`` is provided, further restricts each trial's samples
+    by frame range. Each value is a dict with one of:
+      - ``{'end_frame_max': int}``   -> keep segments with ``end_frame <= bound``
+      - ``{'start_frame_min': int}`` -> keep segments with ``start_frame >= bound``
+
+    Trials absent from ``segment_filter`` keep all their segments.
+    """
     indices = []
     for idx in range(len(dataset)):
-        sample_trial = dataset.samples[idx].get('trial_id', '')
+        sample = dataset.samples[idx]
+        sample_trial = sample.get('trial_id', '')
+        matched = None
         for tid in trial_ids:
             if tid in sample_trial or sample_trial in tid:
-                indices.append(idx)
+                matched = tid
                 break
+        if matched is None:
+            continue
+        if segment_filter:
+            bounds = segment_filter.get(matched) or segment_filter.get(sample_trial)
+            if bounds:
+                sf = sample.get('start_frame')
+                ef = sample.get('end_frame')
+                if 'end_frame_max' in bounds and ef is not None and ef > bounds['end_frame_max']:
+                    continue
+                if 'start_frame_min' in bounds and sf is not None and sf < bounds['start_frame_min']:
+                    continue
+        indices.append(idx)
     return Subset(dataset, indices)
 
 
@@ -533,7 +630,12 @@ def main():
     parser.add_argument('--output_dir', type=str, default='checkpoints', help='Output directory')
     parser.add_argument('--arm', type=str, default='PSM2', help='Arm to use (PSM1 or PSM2)')
     parser.add_argument('--split', type=str, default=None,
-                        help='LOUO split name (e.g., fold_1). If None, uses all data (no validation).')
+                        help='Split name (e.g., fold_1). If None, uses all data (no validation).')
+    parser.add_argument('--split_family', type=str, default='louo',
+                        choices=['louo', 'inter_trial_within_subject', 'intra_trial_half'],
+                        help='Which splits file to read. louo = standard cross-subject; '
+                             'inter_trial_within_subject = hold out one trial per surgeon; '
+                             'intra_trial_half = within-subject temporal (early frames train, late frames test).')
 
     args = parser.parse_args()
 
@@ -544,6 +646,7 @@ def main():
     print(f"Data root: {args.data_root}")
     print(f"Task: {args.task}")
     print(f"Split: {args.split if args.split else 'None (using all data)'}")
+    print(f"Split family: {args.split_family}")
     print(f"Output directory: {args.output_dir}")
     print("=" * 60)
     
@@ -650,13 +753,15 @@ def main():
             data_root=args.data_root,
             split_name=args.split,
             mode='train',
-            arm=args.arm
+            arm=args.arm,
+            split_family=args.split_family,
         )
         val_dataset = JIGSAWSMultiTaskDataset(
             data_root=args.data_root,
             split_name=args.split,
             mode='val',
-            arm=args.arm
+            arm=args.arm,
+            split_family=args.split_family,
         )
         print(f"  - Train samples: {len(train_dataset)}")
         print(f"  - Val samples: {len(val_dataset)}")
@@ -708,17 +813,29 @@ def main():
         # Apply split if specified
         val_dataloader = None
         if args.split is not None:
-            print(f"\nApplying LOUO split: {args.split}")
-            split_loader = SplitLoader(args.data_root, args.task, args.split)
+            print(f"\nApplying split: {args.split} (family={args.split_family})")
+            split_loader = SplitLoader(
+                args.data_root, args.task, args.split, split_family=args.split_family
+            )
 
             train_trials = split_loader.get_train_trials()
             val_trials = split_loader.get_val_trials()
+            train_seg_filter = split_loader.get_segment_filter('train')
+            val_seg_filter = split_loader.get_segment_filter('val')
 
             print(f"  - Train trials ({len(train_trials)}): {train_trials}")
             print(f"  - Val trials ({len(val_trials)}): {val_trials}")
+            if train_seg_filter:
+                print(f"  - Train segment_filter: {len(train_seg_filter)} trials restricted")
+            if val_seg_filter:
+                print(f"  - Val segment_filter: {len(val_seg_filter)} trials restricted")
 
-            train_dataset = filter_dataset_by_trials(full_dataset, train_trials)
-            val_dataset = filter_dataset_by_trials(full_dataset, val_trials)
+            train_dataset = filter_dataset_by_trials(
+                full_dataset, train_trials, segment_filter=train_seg_filter
+            )
+            val_dataset = filter_dataset_by_trials(
+                full_dataset, val_trials, segment_filter=val_seg_filter
+            )
 
             print(f"  - Train samples: {len(train_dataset)}")
             print(f"  - Val samples: {len(val_dataset)}")

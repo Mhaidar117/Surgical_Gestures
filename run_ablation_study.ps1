@@ -560,9 +560,21 @@ foreach ($condition in $selectedConditions) {
     $summaryPath = Join-Path $conditionAnalysisDir "louo_summary.txt"
     $jsonPath = Join-Path $conditionAnalysisDir "louo_results.json"
     $aggregateLog = Join-Path $conditionLogDir "aggregate.log"
+    # Resolve the aggregator path robustly: prefer pipeline/, fall back to repo
+    # root for older checkouts. Use an absolute Windows path to avoid cmd /c
+    # token-splitting on forward slashes (which previously produced
+    # "can't open file 'aggregate_louo_results.py'" at runtime).
+    $aggregateScriptCandidates = @(
+        (Join-Path $PSScriptRoot "pipeline\aggregate_louo_results.py"),
+        (Join-Path $PSScriptRoot "aggregate_louo_results.py")
+    )
+    $aggregateScript = $aggregateScriptCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+    if (-not $aggregateScript) {
+        throw "aggregate_louo_results.py not found under $PSScriptRoot (tried: $($aggregateScriptCandidates -join '; '))"
+    }
     $aggregateCmd = @(
         $pythonExe,
-        "aggregate_louo_results.py",
+        $aggregateScript,
         "--eval_dir", $conditionEvalDir,
         "--output", $summaryPath,
         "--json_output", $jsonPath
@@ -589,7 +601,7 @@ if (-not $SkipExport) {
     $exportLog = Join-Path $comparisonRoot "export.log"
     $exportCmd = @(
         $pythonExe,
-        "scripts/export_ablation_analysis.py",
+        "pipeline/export_ablation_analysis.py",
         "--analysis_root", $AnalysisRoot,
         "--eval_root", $EvalRoot,
         "--runner_script", "run_ablation_study.ps1",

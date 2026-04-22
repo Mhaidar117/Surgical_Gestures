@@ -13,7 +13,7 @@ from typing import Any, List
 from tqdm import tqdm
 
 # Repo ``src`` on path
-_REPO = Path(__file__).resolve().parents[3]
+_REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "src"))
 
 from eeg_eye_bridge.phase1_eeg.export import (
@@ -102,7 +102,7 @@ def parse_args() -> argparse.Namespace:
         "--data_root",
         type=Path,
         default=_REPO,
-        help="Repository root (default: parent of scripts/)",
+        help="Repository root (default: parent of pipeline/)",
     )
     p.add_argument(
         "--eeg_dir",

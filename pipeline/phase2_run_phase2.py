@@ -8,8 +8,8 @@ import json
 import sys
 from pathlib import Path
 
-# repo_root = scripts/eeg_eye_bridge/phase2 -> parents[3]
-_REPO = Path(__file__).resolve().parents[3]
+# repo_root = pipeline/ -> parents[1]
+_REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "src"))
 
 from eeg_eye_bridge.phase2_eye_latents.config import Phase2Config

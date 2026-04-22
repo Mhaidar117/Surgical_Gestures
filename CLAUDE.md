@@ -17,11 +17,13 @@ ViT-based surgical gesture recognition and kinematics prediction for the da Vinc
 export PYTHONPATH=src
 
 # Generate cross-validation splits
-python generate_splits.py
+python pipeline/generate_splits.py
 
 # Full EEG–Eye bridge pipeline (Phase 1 → 2 → 3 → optional Phase 4 training)
-python scripts/eeg_eye_bridge/run_full_pipeline.py
-python scripts/eeg_eye_bridge/run_full_pipeline.py --phase1-synthetic --skip-train  # smoke test
+python pipeline/run_full_pipeline.py
+python pipeline/run_full_pipeline.py --phase1-synthetic --skip-train  # smoke test
+
+# Or interactively: run cells in pipeline/pipeline.ipynb
 
 # 8-fold LOUO baseline training
 ./run_8fold_louo.sh                          # all tasks, baseline config
@@ -41,7 +43,7 @@ python tests/eeg_eye_bridge/test_phase5_integration_coordinator.py
 
 **Windows (PowerShell)** — same commands with `python` and `$env:PYTHONPATH = "src"` instead of `export`. Use Git Bash or WSL for `./run_8fold_louo.sh` / `./run_8fold_louo_brain.sh`, or invoke `python`/`bash` explicitly.
 
-**Evaluation reports for LOUO aggregation:** [`src/eval/evaluate.py`](src/eval/evaluate.py) accepts optional `--output_dir eval_results` together with `--split fold_N` to write `<Task>_test_fold_<n>_results.txt` files compatible with [`aggregate_louo_results.py`](aggregate_louo_results.py). [`run_8fold_louo.sh`](run_8fold_louo.sh) passes `--output_dir` after each fold’s training.
+**Evaluation reports for LOUO aggregation:** [`src/eval/evaluate.py`](src/eval/evaluate.py) accepts optional `--output_dir eval_results` together with `--split fold_N` to write `<Task>_test_fold_<n>_results.txt` files compatible with [`pipeline/aggregate_louo_results.py`](pipeline/aggregate_louo_results.py). [`run_8fold_louo.sh`](run_8fold_louo.sh) passes `--output_dir` after each fold’s training.
 
 ## Architecture
 
@@ -86,21 +88,21 @@ L = w_kin * L_kin + w_gesture * L_gesture + w_skill * L_skill + w_brain * L_brai
 ## EEG–Eye Bridge Pipeline (4 Phases)
 
 ### Phase 1: EEG Export
-- **Script:** `scripts/eeg_eye_bridge/phase1/run_export.py`
+- **Script:** `pipeline/phase1_run_export.py`
 - **Source:** `src/eeg_eye_bridge/phase1_eeg/`
 - **Input:** Raw EDF files (or synthetic EEG via `--synthetic_only`)
 - **Process:** Bandpass filter (1–40 Hz) → notch filter (50 Hz) → sliding windows → baseline encoder (64-dim) + predictive coding encoder (64-dim + prediction errors)
 - **Output:** `cache/eeg_eye_bridge/phase1/` — per-trial pickles with embeddings, manifest.json
 
 ### Phase 2: Eye Consistency
-- **Script:** `scripts/eeg_eye_bridge/phase2/run_phase2.py`
+- **Script:** `pipeline/phase2_run_phase2.py`
 - **Source:** `src/eeg_eye_bridge/phase2_eye_latents/`
 - **Input:** Phase 1 cache + eye-tracking CSVs from `Eye/EYE/`
 - **Process:** Parse gaze/pupil data → clean (remove noise, interpolate blinks) → compute eye summary vectors → score EEG–eye consistency per trial
 - **Output:** `cache/eeg_eye_bridge/phase2/` — eye_summaries/, consistency scores, selected representations
 
 ### Phase 3: RDM Construction
-- **Script:** `scripts/eeg_eye_bridge/phase3/build_rdms.py`
+- **Script:** `pipeline/phase3_build_rdms.py`
 - **Source:** `src/eeg_eye_bridge/phase3_rdm/`
 - **Input:** Phase 1 + Phase 2 caches
 - **Process:** Group trials by task/subskill → aggregate feature vectors → build 6+ candidate RDMs (eye-only, EEG-only, joint, performance-tier) using 1−Spearman metric → score by stability/transfer plausibility → rank and write manifest
@@ -146,11 +148,18 @@ Surgical_Gestures/
 │   ├── inference/                      # Prediction, embedding extraction, visualization
 │   └── safety/                         # dVRK workspace validation, filters
 │
-├── scripts/eeg_eye_bridge/             # Pipeline runner scripts
+├── pipeline/                           # All pipeline-run Python scripts + wrapper notebook
+│   ├── pipeline.ipynb                   # Interactive wrapper: run phases + visualize
 │   ├── run_full_pipeline.py            # Orchestrator: Phase 1 → 2 → 3 → 4
-│   ├── phase1/run_export.py
-│   ├── phase2/run_phase2.py
-│   └── phase3/build_rdms.py
+│   ├── phase1_run_export.py
+│   ├── phase2_run_phase2.py
+│   ├── phase3_build_rdms.py
+│   ├── generate_splits.py              # LOUO split generator
+│   ├── aggregate_louo_results.py       # Aggregates fold results
+│   ├── manuscript_writer.py            # LaTeX manuscript generator
+│   ├── export_ablation_analysis.py     # Ablation comparison export
+│   ├── precompute_eeg_rdms.py          # Offline EEG RDM caching
+│   └── precompute_raft.py              # Optical flow precompute
 │
 ├── tests/eeg_eye_bridge/              # Per-phase tests (Phase 1–5)
 │
@@ -167,8 +176,8 @@ Surgical_Gestures/
 ├── reports/                           # Test and analysis reports (JSON + Markdown)
 ├── run_8fold_louo.sh                  # Baseline 8-fold LOUO training
 ├── run_8fold_louo_brain.sh            # Brain-aligned 8-fold LOUO training
-├── generate_splits.py                 # Creates LOUO cross-validation splits
-└── aggregate_louo_results.py          # Aggregates results across folds
+├── run_ablation_study.ps1             # Full 4-condition ablation runner
+└── misc/                              # Historical / unrelated scripts and outputs
 ```
 
 ## Key Concepts
@@ -206,6 +215,6 @@ Python 3.11+. Key packages: torch 2.7+, torchvision, timm, numpy (<2.0 for torch
 
 **Add a new RDM type:** Add a builder function in `src/eeg_eye_bridge/phase3_rdm/rdm_builders.py`, call it from `pipeline.py → build_all_candidate_rdms()`, and it will automatically appear in the manifest.
 
-**Run a quick smoke test:** `python scripts/eeg_eye_bridge/run_full_pipeline.py --phase1-synthetic --skip-train`
+**Run a quick smoke test:** `python pipeline/run_full_pipeline.py --phase1-synthetic --skip-train`
 
 **Train a single fold:** `python src/training/train_vit_system.py --config src/configs/baseline.yaml --task Suturing --split fold_1 --data_root . --output_dir checkpoints/test`

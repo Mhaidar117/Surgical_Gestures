@@ -1,0 +1,97 @@
+{
+  "aggregate_root": "C:\\Users\\Windows\\Documents\\Test_Runs\\Surgical_Gesture_Learning\\Surgical_Gestures\\checkpoints\\bridge_eeg\\all",
+  "fold_checkpoints": [
+    "C:\\Users\\Windows\\Documents\\Test_Runs\\Surgical_Gesture_Learning\\Surgical_Gestures\\checkpoints\\bridge_eeg\\all\\fold_1\\best_model.pth",
+    "C:\\Users\\Windows\\Documents\\Test_Runs\\Surgical_Gesture_Learning\\Surgical_Gestures\\checkpoints\\bridge_eeg\\all\\fold_2\\best_model.pth",
+    "C:\\Users\\Windows\\Documents\\Test_Runs\\Surgical_Gesture_Learning\\Surgical_Gestures\\checkpoints\\bridge_eeg\\all\\fold_3\\best_model.pth",
+    "C:\\Users\\Windows\\Documents\\Test_Runs\\Surgical_Gesture_Learning\\Surgical_Gestures\\checkpoints\\bridge_eeg\\all\\fold_4\\best_model.pth"
+  ],
+  "per_fold": [
+    {
+      "fold": "fold_1",
+      "n_samples": 206,
+      "surgeons_present": [
+        "B"
+      ]
+    },
+    {
+      "fold": "fold_2",
+      "n_samples": 256,
+      "surgeons_present": [
+        "C"
+      ]
+    },
+    {
+      "fold": "fold_3",
+      "n_samples": 280,
+      "surgeons_present": [
+        "D"
+      ]
+    },
+    {
+      "fold": "fold_4",
+      "n_samples": 223,
+      "surgeons_present": [
+        "E"
+      ]
+    }
+  ],
+  "n_samples_total": 965,
+  "embedding_dim": 384,
+  "surgeon_letter_to_id": {
+    "B": 0,
+    "C": 1,
+    "D": 2,
+    "E": 3
+  },
+  "probes": {
+    "skill": {
+      "target": "skill",
+      "n_classes_present": 3,
+      "n_samples": 965,
+      "majority_baseline": 0.5212435233160622,
+      "linear_accuracy_mean": 1.0,
+      "linear_accuracy_std": 0.0,
+      "linear_balanced_mean": 1.0,
+      "knn_accuracy_mean": 1.0,
+      "knn_accuracy_std": 0.0,
+      "knn_balanced_mean": 1.0
+    },
+    "gesture": {
+      "target": "gesture",
+      "n_classes_present": 14,
+      "n_samples": 965,
+      "majority_baseline": 0.1699481865284974,
+      "linear_accuracy_mean": 0.48703856429817105,
+      "linear_accuracy_std": 0.007785452264975984,
+      "linear_balanced_mean": 0.41442077961684565,
+      "knn_accuracy_mean": 0.48911540080582117,
+      "knn_accuracy_std": 0.003638222382584655,
+      "knn_balanced_mean": 0.4046604305549941
+    },
+    "surgeon": {
+      "target": "surgeon",
+      "n_classes_present": 4,
+      "n_samples": 965,
+      "majority_baseline": 0.29015544041450775,
+      "linear_accuracy_mean": 1.0,
+      "linear_accuracy_std": 0.0,
+      "linear_balanced_mean": 1.0,
+      "knn_accuracy_mean": 1.0,
+      "knn_accuracy_std": 0.0,
+      "knn_balanced_mean": 1.0
+    },
+    "task": {
+      "target": "task",
+      "n_classes_present": 3,
+      "n_samples": 965,
+      "majority_baseline": 0.41865284974093264,
+      "linear_accuracy_mean": 1.0,
+      "linear_accuracy_std": 0.0,
+      "linear_balanced_mean": 1.0,
+      "knn_accuracy_mean": 0.9968911917098445,
+      "knn_accuracy_std": 0.002538331339671696,
+      "knn_balanced_mean": 0.997417695473251
+    }
+  }
+}

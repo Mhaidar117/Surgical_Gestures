@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from typing import Dict, Optional, Tuple
+from typing import Dict, List, Optional, Sequence, Tuple
 from scipy.stats import spearmanr
 
 # Import eye RSA loss for brain_mode='eye' (differentiable Pearson-based)
@@ -368,6 +368,94 @@ def control_regularizer(
     return penalty
 
 
+def surgeon_conditioned_skill_contrastive_loss(
+    embeddings: torch.Tensor,
+    skill_labels: torch.Tensor,
+    surgeon_ids: torch.Tensor,
+    temperature: float = 0.07,
+) -> torch.Tensor:
+    """Supervised contrastive loss (SupCon) over skill, masking same-surgeon pairs.
+
+    The JIGSAWS data pairs each skill rating with specific surgeons, so a naive
+    skill-contrastive loss rewards surgeon-style clustering. This variant only
+    considers **cross-surgeon** pairs:
+
+      - positives for anchor i: samples j with skill(j)=skill(i) AND surgeon(j)!=surgeon(i)
+      - denominator terms:      samples k with surgeon(k)!=surgeon(i)  (regardless of skill)
+      - excluded:               samples with surgeon(k)==surgeon(i)
+
+    Anchors with no cross-surgeon positives in the batch contribute 0. If no
+    anchor in the batch qualifies, returns a scalar 0.
+
+    Args:
+        embeddings: ``(B, D)`` per-sample representation. Will be L2-normalized.
+        skill_labels: ``(B,)`` int skill indices.
+        surgeon_ids: ``(B,)`` int surgeon indices.
+        temperature: softmax temperature (0.07 is the SupCon default).
+    """
+    device = embeddings.device
+    B = embeddings.shape[0]
+    if B < 2:
+        return torch.zeros((), device=device)
+
+    z = F.normalize(embeddings, dim=-1)
+    sim = (z @ z.t()) / temperature  # (B, B) cosine sim / τ
+
+    # Mask same-sample (diagonal) and same-surgeon pairs.
+    eye = torch.eye(B, dtype=torch.bool, device=device)
+    same_surgeon = surgeon_ids.unsqueeze(0) == surgeon_ids.unsqueeze(1)
+    cross_surgeon = ~same_surgeon & ~eye  # (B, B) bool
+
+    # Positives: cross-surgeon AND same skill.
+    same_skill = skill_labels.unsqueeze(0) == skill_labels.unsqueeze(1)
+    positives = cross_surgeon & same_skill
+    n_pos_per_anchor = positives.sum(dim=1)  # (B,)
+
+    valid_anchors = (n_pos_per_anchor > 0) & (cross_surgeon.sum(dim=1) > 0)
+    if not valid_anchors.any():
+        return torch.zeros((), device=device)
+
+    # Numerically stable log-softmax over cross-surgeon set only.
+    # Subtract per-row max on the cross-surgeon mask to avoid overflow.
+    sim_masked = sim.masked_fill(~cross_surgeon, float('-inf'))
+    row_max = sim_masked.max(dim=1, keepdim=True).values
+    row_max = torch.where(torch.isfinite(row_max), row_max,
+                          torch.zeros_like(row_max))
+    exp_sim = torch.exp(sim - row_max) * cross_surgeon.float()  # (B, B)
+    denom = exp_sim.sum(dim=1).clamp(min=1e-12)  # (B,)
+
+    log_prob = sim - row_max - torch.log(denom).unsqueeze(1)  # (B, B)
+    # Mean log-prob over positives, per anchor.
+    pos_log_prob = (log_prob * positives.float()).sum(dim=1) / n_pos_per_anchor.clamp(min=1).float()
+    loss_per_anchor = -pos_log_prob
+
+    return loss_per_anchor[valid_anchors].mean()
+
+
+def surgeon_ids_from_trial_ids(trial_ids: Sequence[str]) -> torch.Tensor:
+    """Extract surgeon IDs from trial-id strings, stable-map to ints.
+
+    JIGSAWS trial IDs have shape ``{Task}_{S}{NNN}`` where ``S`` is a single
+    surgeon letter (B, C, ...). Unknown formats fall back to surgeon_id -1.
+    Returns a ``torch.long`` tensor of shape ``(B,)``.
+    """
+    ids: List[int] = []
+    seen: Dict[str, int] = {}
+    for t in trial_ids:
+        if not isinstance(t, str) or '_' not in t:
+            ids.append(-1)
+            continue
+        suffix = t.rsplit('_', 1)[-1]
+        if not suffix:
+            ids.append(-1)
+            continue
+        letter = suffix[0]
+        if letter not in seen:
+            seen[letter] = len(seen)
+        ids.append(seen[letter])
+    return torch.tensor(ids, dtype=torch.long)
+
+
 def compute_total_loss(
     pred_kinematics: torch.Tensor,
     target_kinematics: torch.Tensor,
@@ -381,7 +469,10 @@ def compute_total_loss(
     eeg_patterns: Optional[torch.Tensor] = None,
     brain_mode: str = 'none',
     loss_weights: Optional[Dict[str, float]] = None,
-    kinematics_format: str = '19d'
+    kinematics_format: str = '19d',
+    skill_embeddings: Optional[torch.Tensor] = None,
+    surgeon_ids: Optional[torch.Tensor] = None,
+    skill_contra_temperature: float = 0.07,
 ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
     """
     Compute total loss with all components.
@@ -410,7 +501,8 @@ def compute_total_loss(
             'gesture': 1.0,
             'skill': 0.5,
             'brain': 0.01,
-            'control': 0.01
+            'control': 0.01,
+            'skill_contra': 0.0,
         }
 
     component_losses = {}
@@ -440,6 +532,11 @@ def compute_total_loss(
         # Coarse Phase 3 target RDM vs model centroid R (same differentiable Pearson loss as eye)
         brain_loss = eye_rsa_loss(model_rdm, eeg_rdm)
         component_losses['brain_rsa'] = brain_loss
+    elif brain_mode == 'kinematics_rsa' and model_rdm is not None and eeg_rdm is not None and eye_rsa_loss is not None:
+        # Stimulus-locked per-sample RSA: model video-embedding RDM vs kinematic
+        # trajectory RDM. Same Pearson-on-upper-triangle loss as eye/bridge.
+        brain_loss = eye_rsa_loss(model_rdm, eeg_rdm)
+        component_losses['brain_rsa'] = brain_loss
     elif brain_mode == 'rsa' and model_rdm is not None and eeg_rdm is not None:
         brain_loss = rsa_loss(model_rdm, eeg_rdm)
         component_losses['brain_rsa'] = brain_loss
@@ -450,14 +547,31 @@ def compute_total_loss(
     # Control regularizer
     control_reg = control_regularizer(pred_kinematics)
     component_losses['control'] = control_reg
-    
+
+    # Surgeon-conditioned skill-contrastive term (optional, weight defaults to 0)
+    skill_contra_weight = loss_weights.get('skill_contra', 0.0)
+    skill_contra_loss = torch.zeros((), device=pred_kinematics.device)
+    if (
+        skill_contra_weight > 0
+        and skill_embeddings is not None
+        and surgeon_ids is not None
+    ):
+        skill_contra_loss = surgeon_conditioned_skill_contrastive_loss(
+            skill_embeddings,
+            skill_labels,
+            surgeon_ids.to(skill_embeddings.device),
+            temperature=skill_contra_temperature,
+        )
+        component_losses['skill_contra'] = skill_contra_loss
+
     # Total loss
     total_loss = (
         loss_weights['kin'] * kin_loss +
         loss_weights['gesture'] * gesture_loss +
         loss_weights['skill'] * skill_loss +
         loss_weights['brain'] * brain_loss +
-        loss_weights['control'] * control_reg
+        loss_weights['control'] * control_reg +
+        skill_contra_weight * skill_contra_loss
     )
     
     component_losses['total'] = total_loss

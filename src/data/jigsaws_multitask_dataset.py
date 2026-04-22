@@ -18,15 +18,38 @@ TASKS = ['Suturing', 'Needle_Passing', 'Knot_Tying']
 TASK_TO_LABEL = {t: i for i, t in enumerate(TASKS)}
 
 
-def filter_dataset_by_trials(dataset: JIGSAWSViTDataset, trial_ids: List[str]) -> Subset:
-    """Filter dataset to only include samples from specific trials."""
+def filter_dataset_by_trials(
+    dataset: JIGSAWSViTDataset,
+    trial_ids: List[str],
+    segment_filter: Optional[Dict[str, Dict]] = None,
+) -> Subset:
+    """Filter dataset to only include samples from specific trials.
+
+    If ``segment_filter`` is provided, further restricts each trial's samples
+    by frame range. See ``train_vit_system.filter_dataset_by_trials`` for the
+    accepted bounds dict shape.
+    """
     indices = []
     for idx in range(len(dataset)):
-        sample_trial = dataset.samples[idx].get('trial_id', '')
+        sample = dataset.samples[idx]
+        sample_trial = sample.get('trial_id', '')
+        matched = None
         for tid in trial_ids:
             if tid in sample_trial or sample_trial in tid:
-                indices.append(idx)
+                matched = tid
                 break
+        if matched is None:
+            continue
+        if segment_filter:
+            bounds = segment_filter.get(matched) or segment_filter.get(sample_trial)
+            if bounds:
+                sf = sample.get('start_frame')
+                ef = sample.get('end_frame')
+                if 'end_frame_max' in bounds and ef is not None and ef > bounds['end_frame_max']:
+                    continue
+                if 'start_frame_min' in bounds and sf is not None and sf < bounds['start_frame_min']:
+                    continue
+        indices.append(idx)
     return Subset(dataset, indices)
 
 
@@ -45,17 +68,19 @@ class JIGSAWSMultiTaskDataset(Dataset):
         use_rgb: bool = True,
         use_flow: bool = True,
         arm: str = 'PSM2',
+        split_family: str = 'louo',
         **kwargs
     ):
         """
         Args:
             data_root: Root directory containing Gestures/ folder
-            split_name: LOUO split name (e.g., 'fold_1')
+            split_name: Split name (e.g., 'fold_1')
             mode: 'train', 'val', or 'test'
             task_type: 'gesture', 'skill', or 'kinematics'
             use_rgb: Whether to load RGB frames
             use_flow: Whether to load optical flow
             arm: 'PSM1' or 'PSM2'
+            split_family: Which splits file to read. See SplitLoader docs.
             **kwargs: Additional args passed to JIGSAWSViTDataset
         """
         self.data_root = Path(data_root)
@@ -63,6 +88,7 @@ class JIGSAWSMultiTaskDataset(Dataset):
         self.mode = mode
         self.task_type = task_type
         self.arm = arm
+        self.split_family = split_family
 
         # Build per-task subsets
         self.task_datasets: List[Subset] = []
@@ -70,7 +96,7 @@ class JIGSAWSMultiTaskDataset(Dataset):
         self.cumulative_sizes: List[int] = [0]
 
         for task in TASKS:
-            split_loader = SplitLoader(str(data_root), task, split_name)
+            split_loader = SplitLoader(str(data_root), task, split_name, split_family=split_family)
             trials = (
                 split_loader.get_train_trials()
                 if mode == 'train'
@@ -78,6 +104,7 @@ class JIGSAWSMultiTaskDataset(Dataset):
                 if mode == 'val'
                 else split_loader.get_test_trials()
             )
+            seg_filter = split_loader.get_segment_filter(mode)
 
             full_dataset = JIGSAWSViTDataset(
                 data_root=str(data_root),
@@ -90,7 +117,7 @@ class JIGSAWSMultiTaskDataset(Dataset):
                 **kwargs
             )
 
-            subset = filter_dataset_by_trials(full_dataset, trials)
+            subset = filter_dataset_by_trials(full_dataset, trials, segment_filter=seg_filter)
             self.task_datasets.append(subset)
             self.task_labels.extend([TASK_TO_LABEL[task]] * len(subset))
             self.cumulative_sizes.append(self.cumulative_sizes[-1] + len(subset))

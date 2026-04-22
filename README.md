@@ -35,7 +35,7 @@ export PYTHONPATH=src
 cd path\to\Surgical_Gestures
 conda activate surgical_gestures_venv   # if using conda
 $env:PYTHONPATH = "src"
-python generate_splits.py
+python pipeline/generate_splits.py
 ```
 
 ---
@@ -50,7 +50,7 @@ Place the **JIGSAWS**-style tree under this repository (video, kinematics, trans
 Large assets are listed in [`.gitignore`](.gitignore). **`data/splits/`** — generate LOUO split files locally:
 
 ```bash
-python generate_splits.py
+python pipeline/generate_splits.py
 ```
 
 ---
@@ -95,7 +95,7 @@ The script trains each fold, runs [`src/eval/evaluate.py`](src/eval/evaluate.py)
 ## Aggregate LOUO metrics
 
 ```bash
-python aggregate_louo_results.py
+python pipeline/aggregate_louo_results.py
 ```
 
 Defaults: read `eval_results/` for files matching `<Task>_test_fold_*.txt`, write `louo_summary.txt` and `louo_results.json`. If no files match, the script reports that and exits.
@@ -108,13 +108,15 @@ Runs Phase 1 (EEG export) → Phase 2 (eye consistency) → Phase 3 (RDMs + mani
 
 ```bash
 export PYTHONPATH=src
-python scripts/eeg_eye_bridge/run_full_pipeline.py
+python pipeline/run_full_pipeline.py
 ```
+
+Or run interactively via [`pipeline/pipeline.ipynb`](pipeline/pipeline.ipynb) (phase-by-phase with visualizations).
 
 Smoke test (synthetic Phase 1, no training):
 
 ```bash
-python scripts/eeg_eye_bridge/run_full_pipeline.py --phase1-synthetic --skip-train
+python pipeline/run_full_pipeline.py --phase1-synthetic --skip-train
 ```
 
 Caches go under `cache/eeg_eye_bridge/`. Phase details and brain modes are documented in [`CLAUDE.md`](CLAUDE.md).
@@ -126,7 +128,7 @@ Caches go under `cache/eeg_eye_bridge/`. Phase details and brain modes are docum
 | Script | Role |
 |--------|------|
 | [`run_ablation_study.ps1`](run_ablation_study.ps1) | Windows: four configs × three tasks × eight folds → `checkpoints/<config>/<task>/fold_n/` |
-| [`scripts/run_ablations.sh`](scripts/run_ablations.sh) | Unix: focused ablations (`brain`, `lambda`, `finetune`, `layers`, or `all`) into `checkpoints/ablations/` |
+| [`misc/run_ablations.sh`](misc/run_ablations.sh) | Unix (legacy): focused ablations (`brain`, `lambda`, `finetune`, `layers`, or `all`) into `checkpoints/ablations/` |
 
 ---
 

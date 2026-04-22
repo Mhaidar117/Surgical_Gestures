@@ -6,8 +6,8 @@ Computes mean ± std for all metrics across folds, which is the standard
 way to report LOUO results in surgical gesture recognition papers.
 
 Usage:
-    python3 aggregate_louo_results.py
-    python3 aggregate_louo_results.py --eval_dir eval_results --output louo_summary.txt
+    python3 pipeline/aggregate_louo_results.py
+    python3 pipeline/aggregate_louo_results.py --eval_dir eval_results --output louo_summary.txt
 """
 import os
 import re

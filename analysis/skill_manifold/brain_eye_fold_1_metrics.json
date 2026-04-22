@@ -1,0 +1,10 @@
+{
+  "checkpoint": "C:\\Users\\Windows\\Documents\\Test_Runs\\Surgical_Gesture_Learning\\Surgical_Gestures\\checkpoints\\brain_eye\\all\\fold_1\\best_model.pth",
+  "split": "fold_1",
+  "split_family": "louo",
+  "task": "all",
+  "n_samples": 206,
+  "overall": null,
+  "per_gesture": {},
+  "config_brain_mode": "eye"
+}

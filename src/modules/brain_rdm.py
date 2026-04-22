@@ -270,6 +270,50 @@ def load_eye_rdm(path: str) -> torch.Tensor:
     return torch.from_numpy(rdm).float()
 
 
+def pairwise_distance_rdm(features: torch.Tensor, eps: float = 1e-8) -> torch.Tensor:
+    """Differentiable pairwise Euclidean distance RDM.
+
+    Args:
+        features: ``(N, D)`` tensor.
+        eps: stability offset inside sqrt.
+
+    Returns:
+        ``(N, N)`` distance matrix with zero diagonal.
+    """
+    diff = features.unsqueeze(0) - features.unsqueeze(1)  # (N, N, D)
+    return torch.sqrt((diff ** 2).sum(dim=-1) + eps)
+
+
+def kinematics_trajectory_features(
+    kinematics: torch.Tensor,
+    mask: Optional[torch.Tensor] = None,
+) -> torch.Tensor:
+    """Pool a per-frame kinematics tensor into a per-sample feature vector.
+
+    Uses concat(mean, std) so the target captures both pose and motion amplitude.
+    A gesture that hovers near a single joint state and one that sweeps a large
+    range end up at different points in the target space.
+
+    Args:
+        kinematics: ``(B, T, K)`` per-frame kinematics.
+        mask: optional ``(B, T)`` bool mask; True for valid timesteps. If None,
+            all timesteps are considered valid.
+
+    Returns:
+        ``(B, 2 * K)`` tensor.
+    """
+    if mask is None:
+        mean = kinematics.mean(dim=1)
+        std = kinematics.std(dim=1)
+    else:
+        m = mask.float().unsqueeze(-1)  # (B, T, 1)
+        denom = m.sum(dim=1).clamp(min=1.0)  # (B, 1)
+        mean = (kinematics * m).sum(dim=1) / denom
+        sq = ((kinematics - mean.unsqueeze(1)) ** 2 * m).sum(dim=1) / denom
+        std = torch.sqrt(sq + 1e-8)
+    return torch.cat([mean, std], dim=-1)
+
+
 def compute_centroid_rdm(
     embeddings: torch.Tensor,
     group_labels: torch.Tensor,

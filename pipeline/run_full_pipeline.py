@@ -7,14 +7,14 @@ so you still see logs from each step.
 
 Usage (from repo root)::
 
-    python3 scripts/eeg_eye_bridge/run_full_pipeline.py
-    python3 scripts/eeg_eye_bridge/run_full_pipeline.py --phase1-synthetic --skip-train
+    python3 pipeline/run_full_pipeline.py
+    python3 pipeline/run_full_pipeline.py --phase1-synthetic --skip-train
 
 Or with venv::
 
     source .venv/bin/activate
     export PYTHONPATH=src   # optional; script sets PYTHONPATH for children
-    python scripts/eeg_eye_bridge/run_full_pipeline.py
+    python pipeline/run_full_pipeline.py
 """
 from __future__ import annotations
 
@@ -33,7 +33,7 @@ except ImportError as e:
 
 
 def _repo_root() -> Path:
-    return Path(__file__).resolve().parents[2]
+    return Path(__file__).resolve().parents[1]
 
 
 def _py() -> str:
@@ -110,7 +110,7 @@ def main() -> None:
 
     phase1_cmd = [
         _py(),
-        str(repo / "scripts" / "eeg_eye_bridge" / "phase1" / "run_export.py"),
+        str(repo / "pipeline" / "phase1_run_export.py"),
         "--data_root",
         str(data_root),
     ]
@@ -121,7 +121,7 @@ def main() -> None:
 
     phase2_cmd = [
         _py(),
-        str(repo / "scripts" / "eeg_eye_bridge" / "phase2" / "run_phase2.py"),
+        str(repo / "pipeline" / "phase2_run_phase2.py"),
         "--repo-root",
         str(data_root),
     ]
@@ -130,7 +130,7 @@ def main() -> None:
 
     phase3_cmd = [
         _py(),
-        str(repo / "scripts" / "eeg_eye_bridge" / "phase3" / "build_rdms.py"),
+        str(repo / "pipeline" / "phase3_build_rdms.py"),
         "--cache-root",
         str(data_root / "cache" / "eeg_eye_bridge"),
     ]

@@ -39,6 +39,9 @@ embeddings/
 eval_results/
 louo_summary.txt
 
+# Archived / stale outputs (local)
+archive/
+
 # Partial downloads
 *.crdownload
 

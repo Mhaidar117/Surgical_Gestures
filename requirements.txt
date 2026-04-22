@@ -33,7 +33,7 @@ matplotlib>=3.7.0
 seaborn>=0.12.0
 
 # Utilities
-psutil>=5.9.0  # optional: RSS reporting in scripts/eeg_eye_bridge/debug_phase1_load.py
+psutil>=5.9.0  # optional: RSS reporting in misc/debug_phase1_load.py
 multipledispatch>=0.6.0
 barbar>=0.2.1
 tqdm>=4.65.0

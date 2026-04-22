@@ -1,0 +1,66 @@
+{
+  "checkpoint": "C:\\Users\\Windows\\Documents\\Test_Runs\\Surgical_Gesture_Learning\\Surgical_Gestures\\checkpoints\\sweeps\\t1_smoke\\brain_mode_kinematics_rsa__w_skill_contra_0.1\\best_model.pth",
+  "split": "fold_1",
+  "split_family": "louo",
+  "probe_mode": "train",
+  "n_samples": 1241,
+  "embedding_dim": 384,
+  "surgeon_letter_to_id": {
+    "D": 0,
+    "E": 1,
+    "F": 2,
+    "G": 3,
+    "H": 4,
+    "I": 5
+  },
+  "probes": {
+    "skill": {
+      "target": "skill",
+      "n_classes_present": 3,
+      "n_samples": 1241,
+      "majority_baseline": 0.4383561643835616,
+      "linear_accuracy_mean": 0.9782420002591008,
+      "linear_accuracy_std": 0.00974712577243107,
+      "linear_balanced_mean": 0.9688058420265051,
+      "knn_accuracy_mean": 0.9838774452649307,
+      "knn_accuracy_std": 0.0076575075818726985,
+      "knn_balanced_mean": 0.9699297229800982
+    },
+    "gesture": {
+      "target": "gesture",
+      "n_classes_present": 14,
+      "n_samples": 1241,
+      "majority_baseline": 0.16116035455278002,
+      "linear_accuracy_mean": 0.5841592175152222,
+      "linear_accuracy_std": 0.03221030783559396,
+      "linear_balanced_mean": 0.5323296510550206,
+      "knn_accuracy_mean": 0.5253562637647363,
+      "knn_accuracy_std": 0.021926564598766737,
+      "knn_balanced_mean": 0.432282694727276
+    },
+    "surgeon": {
+      "target": "surgeon",
+      "n_classes_present": 6,
+      "n_samples": 1241,
+      "majority_baseline": 0.22562449637389204,
+      "linear_accuracy_mean": 0.9685645809042622,
+      "linear_accuracy_std": 0.007842254188050577,
+      "linear_balanced_mean": 0.9665262809349408,
+      "knn_accuracy_mean": 0.9419613939629485,
+      "knn_accuracy_std": 0.017816200030399115,
+      "knn_balanced_mean": 0.9386862108383186
+    },
+    "task": {
+      "target": "task",
+      "n_classes_present": 3,
+      "n_samples": 1241,
+      "majority_baseline": 0.4794520547945205,
+      "linear_accuracy_mean": 1.0,
+      "linear_accuracy_std": 0.0,
+      "linear_balanced_mean": 1.0,
+      "knn_accuracy_mean": 1.0,
+      "knn_accuracy_std": 0.0,
+      "knn_balanced_mean": 1.0
+    }
+  }
+}

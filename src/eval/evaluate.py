@@ -25,7 +25,15 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from models.losses import compute_total_loss
-from eval.metrics import compute_kinematics_metrics, compute_gesture_metrics, compute_skill_metrics
+from eval.metrics import (
+    compute_kinematics_metrics,
+    compute_gesture_metrics,
+    compute_skill_metrics,
+    compute_gesture_edit_distance,
+    compute_frame_weighted_gesture_accuracy,
+    compute_gesture_frame_iou,
+    compute_ordinal_skill_metrics,
+)
 from data import JIGSAWSViTDataset
 from data.split_loader import SplitLoader
 from torch.utils.data import DataLoader, Subset
@@ -62,6 +70,9 @@ def evaluate(
     all_gesture_labels = []
     all_skill_logits = []
     all_skill_labels = []
+    all_trial_ids: List[str] = []
+    all_start_frames: List[int] = []
+    all_end_frames: List[int] = []
 
     num_batches = 0
 
@@ -106,6 +117,17 @@ def evaluate(
             all_skill_logits.append(outputs['skill_logits'].cpu())
             all_skill_labels.append(skill_labels.cpu())
 
+            # Per-segment identity + frame range (needed for sequence / IoU metrics)
+            tids = batch.get('trial_id')
+            if isinstance(tids, (list, tuple)):
+                all_trial_ids.extend(str(t) for t in tids)
+            sf = batch.get('start_frame')
+            ef = batch.get('end_frame')
+            if isinstance(sf, torch.Tensor):
+                all_start_frames.extend(sf.tolist())
+            if isinstance(ef, torch.Tensor):
+                all_end_frames.extend(ef.tolist())
+
             num_batches += 1
             pbar.set_postfix({'loss': f'{loss.item():.4f}'})
 
@@ -124,6 +146,34 @@ def evaluate(
     kin_metrics = compute_kinematics_metrics(all_kin_preds, all_kin_targets)
     gesture_metrics = compute_gesture_metrics(all_gesture_logits, all_gesture_labels)
     skill_metrics = compute_skill_metrics(all_skill_logits, all_skill_labels)
+
+    # Ordinal skill metrics (N < I < E ordering)
+    skill_metrics.update(compute_ordinal_skill_metrics(all_skill_logits, all_skill_labels))
+
+    # Sequence-level gesture metrics (require per-segment trial_id + frame range)
+    N = all_gesture_logits.shape[0]
+    if len(all_trial_ids) == N and len(all_start_frames) == N and len(all_end_frames) == N:
+        pred_per_seg = all_gesture_logits.argmax(dim=-1).tolist()
+        true_per_seg = all_gesture_labels.tolist()
+        durations = [max(0, e - s) for s, e in zip(all_start_frames, all_end_frames)]
+
+        # Group segments by trial_id, sort by start_frame, build per-trial sequences
+        trial_bins: Dict[str, List[tuple]] = {}
+        for tid, sfr, p, t in zip(all_trial_ids, all_start_frames, pred_per_seg, true_per_seg):
+            trial_bins.setdefault(tid, []).append((sfr, p, t))
+        pred_seqs, true_seqs = [], []
+        for tid in sorted(trial_bins.keys()):
+            items = sorted(trial_bins[tid], key=lambda x: x[0])
+            pred_seqs.append([p for _, p, _ in items])
+            true_seqs.append([t for _, _, t in items])
+
+        gesture_metrics.update(compute_gesture_edit_distance(pred_seqs, true_seqs))
+        gesture_metrics['gesture_frame_weighted_accuracy'] = (
+            compute_frame_weighted_gesture_accuracy(pred_per_seg, true_per_seg, durations)
+        )
+        gesture_metrics.update(
+            compute_gesture_frame_iou(pred_per_seg, true_per_seg, durations, num_classes=15)
+        )
 
     # Combine all results
     results = {
@@ -166,11 +216,23 @@ def print_results(results: Dict, mode: str = 'val'):
     print(f"  Accuracy: {gesture['gesture_accuracy']*100:.2f}%")
     print(f"  F1 (Macro): {gesture['gesture_f1_macro']:.4f}")
     print(f"  F1 (Micro): {gesture['gesture_f1_micro']:.4f}")
+    if 'gesture_frame_weighted_accuracy' in gesture:
+        print(f"  Frame-weighted Accuracy: {gesture['gesture_frame_weighted_accuracy']*100:.2f}%")
+    if 'edit_distance_mean' in gesture:
+        print(f"  Edit Distance: {gesture['edit_distance_mean']:.3f} "
+              f"(normalized: {gesture.get('edit_distance_normalized', 0):.3f})")
+    if 'iou_mean' in gesture:
+        print(f"  Frame IoU (mean over {gesture['iou_classes_seen']} classes): "
+              f"{gesture['iou_mean']:.4f}")
 
     print("\nSkill Classification:")
     skill = results['skill']
     print(f"  Accuracy: {skill['skill_accuracy']*100:.2f}%")
     print(f"  F1 (Macro): {skill['skill_f1_macro']:.4f}")
+    if 'ord_mae' in skill:
+        print(f"  Ordinal MAE (argmax): {skill['ord_mae']:.4f}")
+        print(f"  Ordinal MAE (expected): {skill.get('ord_expected_mae', 0):.4f}")
+        print(f"  Ordinal Spearman ρ: {skill.get('ord_spearman', 0):.4f}")
 
     print("=" * 60)
 
@@ -229,12 +291,23 @@ def save_aggregate_compatible_report(
     lines.append(f"  Accuracy: {gesture['gesture_accuracy'] * 100:.2f}%")
     lines.append(f"  F1 Macro: {gesture['gesture_f1_macro']:.4f}")
     lines.append(f"  F1 Micro: {gesture['gesture_f1_micro']:.4f}")
+    if 'gesture_frame_weighted_accuracy' in gesture:
+        lines.append(f"  Frame-weighted Accuracy: {gesture['gesture_frame_weighted_accuracy'] * 100:.2f}%")
+    if 'edit_distance_mean' in gesture:
+        lines.append(f"  Edit Distance: {gesture['edit_distance_mean']:.3f}")
+        lines.append(f"  Edit Distance Normalized: {gesture.get('edit_distance_normalized', 0):.3f}")
+    if 'iou_mean' in gesture:
+        lines.append(f"  Frame IoU Mean: {gesture['iou_mean']:.4f}")
 
     skill = results["skill"]
     lines.append("")
     lines.append("Skill Metrics")
     lines.append(f"  Accuracy: {skill['skill_accuracy'] * 100:.2f}%")
     lines.append(f"  F1 Macro: {skill['skill_f1_macro']:.4f}")
+    if 'ord_mae' in skill:
+        lines.append(f"  Ordinal MAE: {skill['ord_mae']:.4f}")
+        lines.append(f"  Ordinal Expected MAE: {skill.get('ord_expected_mae', 0):.4f}")
+        lines.append(f"  Ordinal Spearman: {skill.get('ord_spearman', 0):.4f}")
     lines.append("=" * 60)
 
     out_path.write_text("\n".join(lines) + "\n", encoding="utf-8")

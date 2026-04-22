@@ -164,34 +164,69 @@ def get_trials_for_split(
     return splits[split_name].get(mode, [])
 
 
+SPLIT_FAMILY_FILENAMES = {
+    'louo': '{task}_splits.json',
+    'inter_trial_within_subject': '{task}_splits_inter_trial_within_subject.json',
+    'intra_trial_half': '{task}_splits_intra_trial_half.json',
+}
+
+
 class SplitLoader:
     """
     Convenience class for loading and managing data splits.
+
+    Supports three split families (selected via ``split_family`` argument):
+      - ``louo``: leave-one-user-out (default). Standard cross-surgeon protocol.
+      - ``inter_trial_within_subject``: per-surgeon folds that hold out one trial
+        of that surgeon; their remaining trials stay in train. Measures how much
+        of cross-subject failure is driven by unseen motor style.
+      - ``intra_trial_half``: per-surgeon folds that split each trial's frames at
+        the midpoint. Train = early frames, test = later frames of the SAME
+        trials. Measures within-subject temporal generalization. Each fold also
+        carries a ``segment_filter`` dict for train/test.
     """
-    
+
     def __init__(
         self,
         data_root: str,
         task: str = 'Knot_Tying',
-        split_name: Optional[str] = None
+        split_name: Optional[str] = None,
+        split_family: str = 'louo',
     ):
         """
         Args:
             data_root: Root directory
             task: Task name
             split_name: Split name (e.g., 'fold_1'), None uses all data
+            split_family: One of 'louo', 'inter_trial_within_subject',
+                'intra_trial_half'. Selects which splits file to read.
         """
         self.data_root = Path(data_root)
         self.task = task
         self.split_name = split_name
-        
-        # Load or generate splits
-        split_file = self.data_root / 'data' / 'splits' / f'{task}_splits.json'
+        self.split_family = split_family
+
+        if split_family not in SPLIT_FAMILY_FILENAMES:
+            raise ValueError(
+                f"Unknown split_family {split_family!r}. "
+                f"Valid options: {list(SPLIT_FAMILY_FILENAMES)}"
+            )
+        filename = SPLIT_FAMILY_FILENAMES[split_family].format(task=task)
+        split_file = self.data_root / 'data' / 'splits' / filename
         if split_file.exists():
             self.splits = load_splits(str(split_file))
-        else:
+        elif split_family == 'louo':
             self.splits = generate_louo_splits(str(data_root), task)
-        
+        else:
+            raise FileNotFoundError(
+                f"Split file not found: {split_file}. "
+                f"Generate it first with `python pipeline/generate_splits.py`."
+            )
+
+        # Strip out non-fold metadata (e.g. 'split_family' marker at the top
+        # level) before indexing by fold name.
+        self.splits = {k: v for k, v in self.splits.items() if isinstance(v, dict)}
+
         if split_name is not None:
             if split_name not in self.splits:
                 raise ValueError(f"Split {split_name} not found")
@@ -233,4 +268,18 @@ class SplitLoader:
     def get_all_folds(self) -> List[str]:
         """Get list of all fold names."""
         return sorted(self.splits.keys())
+
+    def get_segment_filter(self, mode: str = 'train') -> Optional[Dict[str, Dict]]:
+        """Return per-trial frame-range filter for this fold/mode, or None.
+
+        Populated only for split families that restrict segments within a trial
+        (e.g. ``intra_trial_half``). Shape:
+            {trial_id: {'end_frame_max': int} | {'start_frame_min': int}}
+        """
+        if not self.current_split:
+            return None
+        seg = self.current_split.get('segment_filter')
+        if not seg:
+            return None
+        return seg.get(mode)
 

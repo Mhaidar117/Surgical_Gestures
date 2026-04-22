@@ -118,5 +118,55 @@
         "error_message":  "",
         "log_path":  "analysis\\bridge_eeg\\logs\\Knot_Tying_fold_3_eval.log",
         "timestamp":  "2026-04-21T09:42:05-07:00"
+    },
+    {
+        "condition":  "bridge_eeg",
+        "task":  "all",
+        "fold":  "fold_4",
+        "stage":  "train",
+        "status":  "completed",
+        "error_message":  "",
+        "log_path":  "analysis\\bridge_eeg\\logs\\all_fold_4_train.log",
+        "timestamp":  "2026-04-21T11:28:47-07:00"
+    },
+    {
+        "condition":  "bridge_eeg",
+        "task":  "Suturing",
+        "fold":  "fold_4",
+        "stage":  "eval",
+        "status":  "completed",
+        "error_message":  "",
+        "log_path":  "analysis\\bridge_eeg\\logs\\Suturing_fold_4_eval.log",
+        "timestamp":  "2026-04-21T11:29:41-07:00"
+    },
+    {
+        "condition":  "bridge_eeg",
+        "task":  "Needle_Passing",
+        "fold":  "fold_4",
+        "stage":  "eval",
+        "status":  "completed",
+        "error_message":  "",
+        "log_path":  "analysis\\bridge_eeg\\logs\\Needle_Passing_fold_4_eval.log",
+        "timestamp":  "2026-04-21T11:30:30-07:00"
+    },
+    {
+        "condition":  "bridge_eeg",
+        "task":  "Knot_Tying",
+        "fold":  "fold_4",
+        "stage":  "eval",
+        "status":  "completed",
+        "error_message":  "",
+        "log_path":  "analysis\\bridge_eeg\\logs\\Knot_Tying_fold_4_eval.log",
+        "timestamp":  "2026-04-21T11:31:01-07:00"
+    },
+    {
+        "condition":  "bridge_eeg",
+        "task":  "*",
+        "fold":  "*",
+        "stage":  "aggregate",
+        "status":  "failed_other",
+        "error_message":  "python: can\u0027t open file \u0027C:\\\\Users\\\\Windows\\\\Documents\\\\Test_Runs\\\\Surgical_Gesture_Learning\\\\Surgical_Gestures\\\\aggregate_louo_results.py\u0027: [Errno 2] No such file or directory",
+        "log_path":  "analysis\\bridge_eeg\\logs\\aggregate.log",
+        "timestamp":  "2026-04-21T11:31:01-07:00"
     }
 ]
