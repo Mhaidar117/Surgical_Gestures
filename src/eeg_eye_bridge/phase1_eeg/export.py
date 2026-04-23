@@ -15,8 +15,9 @@ import numpy as np
 CONTRACT_VERSION = "phase1_eeg_v1"
 
 
-def phase1_cache_root(data_root: Path) -> Path:
-    return Path(data_root) / "cache" / "eeg_eye_bridge" / "phase1"
+def phase1_cache_root(data_root: Path, *, workspace_root: Path | None = None) -> Path:
+    base = Path(workspace_root) if workspace_root is not None else Path(data_root)
+    return base / "cache" / "eeg_eye_bridge" / "phase1"
 
 
 def export_trial_pickle(

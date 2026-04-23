@@ -6,6 +6,7 @@ Usage:
     python pipeline/generate_splits.py
 """
 import os
+import sys
 import json
 from pathlib import Path
 from collections import defaultdict
@@ -313,6 +314,11 @@ def print_split_summary(splits, task):
 
 
 if __name__ == '__main__':
+    _REPO = Path(__file__).resolve().parents[1]
+    sys.path.insert(0, str(_REPO / "src"))
+    from dataset_paths import resolve_dataset_root
+
+    root = str(resolve_dataset_root(fallback_repo_root=_REPO))
     all_splits = {}
 
     for task in ['Knot_Tying', 'Needle_Passing', 'Suturing']:
@@ -321,12 +327,12 @@ if __name__ == '__main__':
         print(f'{"="*70}')
 
         try:
-            splits = generate_louo_splits('.', task)
+            splits = generate_louo_splits(root, task)
             all_splits[task] = splits
             print_split_summary(splits, task)
 
-            generate_inter_trial_within_subject_splits('.', task)
-            generate_intra_trial_half_splits('.', task)
+            generate_inter_trial_within_subject_splits(root, task)
+            generate_intra_trial_half_splits(root, task)
         except Exception as e:
             import traceback
             print(f'Error: {e}')

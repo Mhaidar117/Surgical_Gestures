@@ -29,6 +29,7 @@ from tqdm import tqdm
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from dataset_paths import resolve_dataset_root
 from models.visual import ViTFrameEncoder
 from models.temporal_transformer import TemporalAggregatorWithPooling
 from models.kinematics import KinematicsModule
@@ -622,9 +623,15 @@ def filter_dataset_by_trials(
 
 
 def main():
+    _repo_root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description='Train ViT system')
     parser.add_argument('--config', type=str, required=True, help='Path to config YAML')
-    parser.add_argument('--data_root', type=str, required=True, help='Data root directory')
+    parser.add_argument(
+        '--data_root',
+        type=str,
+        default=None,
+        help='Dataset root (EEG/Eye/Gestures). Default: $SURGICAL_GESTURES_DATA_ROOT, else iCloud path if present, else repo.',
+    )
     parser.add_argument('--task', type=str, default='Knot_Tying',
                        help='Task name (Knot_Tying, Needle_Passing, Suturing, or "all" for multi-task brain alignment)')
     parser.add_argument('--output_dir', type=str, default='checkpoints', help='Output directory')
@@ -638,6 +645,9 @@ def main():
                              'intra_trial_half = within-subject temporal (early frames train, late frames test).')
 
     args = parser.parse_args()
+    args.data_root = str(
+        resolve_dataset_root(args.data_root, fallback_repo_root=_repo_root)
+    )
 
     print("\n" + "=" * 60)
     print("ViT Training System")

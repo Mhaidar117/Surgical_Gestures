@@ -16,6 +16,8 @@ from tqdm import tqdm
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "src"))
 
+from dataset_paths import resolve_dataset_root
+
 from eeg_eye_bridge.phase1_eeg.export import (
     CONTRACT_VERSION,
     aggregate_family_summaries,
@@ -101,8 +103,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument(
         "--data_root",
         type=Path,
+        default=None,
+        help="Dataset root with EEG/, Eye/, Gestures/ (default: env or iCloud path if present, else repo)",
+    )
+    p.add_argument(
+        "--workspace_root",
+        type=Path,
         default=_REPO,
-        help="Repository root (default: parent of pipeline/)",
+        help="Where to write cache/eeg_eye_bridge/ (default: repo root)",
     )
     p.add_argument(
         "--eeg_dir",
@@ -130,11 +138,12 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    data_root = Path(args.data_root).resolve()
+    data_root = resolve_dataset_root(args.data_root, fallback_repo_root=_REPO)
+    workspace_root = Path(args.workspace_root).resolve()
     eeg_dir = args.eeg_dir or (data_root / "EEG" / "EEG")
     perf_csv = data_root / "Eye" / "PerformanceScores.csv"
     table1 = data_root / "Eye" / "Table1.csv"
-    cache = phase1_cache_root(data_root)
+    cache = phase1_cache_root(data_root, workspace_root=workspace_root)
     trials_dir = cache / "trials"
     trials_dir.mkdir(parents=True, exist_ok=True)
 

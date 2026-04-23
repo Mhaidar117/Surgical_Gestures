@@ -31,6 +31,8 @@ from typing import Any, Dict, List, Optional, Tuple
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "src"))
 
+from dataset_paths import resolve_dataset_root
+
 try:
     import psutil
 
@@ -47,8 +49,8 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument(
         "--data_root",
         type=Path,
-        default=_REPO,
-        help="Repository root (default: parent of scripts/)",
+        default=None,
+        help="Dataset root (default: env or iCloud path if present, else repo)",
     )
     p.add_argument(
         "--eeg_dir",
@@ -390,7 +392,7 @@ def _memory_probe(
 
 def main() -> None:
     args = _parse_args()
-    data_root = Path(args.data_root).resolve()
+    data_root = resolve_dataset_root(args.data_root, fallback_repo_root=_REPO)
     eeg_dir = args.eeg_dir or (data_root / "EEG" / "EEG")
     perf_csv = data_root / "Eye" / "PerformanceScores.csv"
     table1 = data_root / "Eye" / "Table1.csv"

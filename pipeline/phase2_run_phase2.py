@@ -12,6 +12,8 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_REPO / "src"))
 
+from dataset_paths import resolve_dataset_root
+
 from eeg_eye_bridge.phase2_eye_latents.config import Phase2Config
 from eeg_eye_bridge.phase2_eye_latents.export_phase2 import run_phase2_pipeline
 
@@ -22,7 +24,13 @@ def main() -> None:
         "--repo-root",
         type=Path,
         default=_REPO,
-        help="Repository root (default: auto)",
+        help="Workspace (repo) root: Phase 1/2 caches (default: auto)",
+    )
+    p.add_argument(
+        "--data-root",
+        type=Path,
+        default=None,
+        help="Dataset root for Eye/EYE and CSVs (default: env or iCloud path if present, else repo-root)",
     )
     p.add_argument(
         "--phase1-dir",
@@ -57,7 +65,15 @@ def main() -> None:
     p.add_argument("--debug", action="store_true", help="Print verbose diagnostics")
     args = p.parse_args()
 
-    cfg = Phase2Config(repo_root=args.repo_root, subset=args.subset, debug=args.debug)
+    data_root = resolve_dataset_root(
+        args.data_root, fallback_repo_root=Path(args.repo_root)
+    )
+    cfg = Phase2Config(
+        repo_root=args.repo_root,
+        data_root=data_root,
+        subset=args.subset,
+        debug=args.debug,
+    )
     if args.eye_root is not None:
         cfg.eye_root = Path(args.eye_root)
     if args.trial_ids:

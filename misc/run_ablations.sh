@@ -14,7 +14,14 @@
 set -e
 
 ABLATION=${1:-all}
-DATA_ROOT="."
+_DEFAULT_SURGICAL_DATA_ROOT="/Users/michaelhaidar/Library/Mobile Documents/com~apple~CloudDocs/Documents/Vanderbilt/Fall_25/Surgical Robotics/Surgical_Gestures"
+if [ -n "${SURGICAL_GESTURES_DATA_ROOT:-}" ]; then
+    DATA_ROOT="$SURGICAL_GESTURES_DATA_ROOT"
+elif [ -d "$_DEFAULT_SURGICAL_DATA_ROOT" ]; then
+    DATA_ROOT="$_DEFAULT_SURGICAL_DATA_ROOT"
+else
+    DATA_ROOT="."
+fi
 SPLIT="fold_1"
 BASE_OUTPUT="checkpoints/ablations"
 mkdir -p "$BASE_OUTPUT"

@@ -12,6 +12,11 @@ class Phase2Config:
     """Default layout matches Docs/Prompts/phase2_eye_consistent_latents_agent_prompt.md."""
 
     repo_root: Path
+    """Workspace root (repo): Phase 1/2 caches live under cache/eeg_eye_bridge/."""
+
+    data_root: Optional[Path] = None
+    """Dataset root: Eye/EYE and metadata CSVs; defaults to repo_root when omitted."""
+
     phase1_dir: Path = field(init=False)
     phase2_cache_dir: Path = field(init=False)
     eye_root: Path = field(init=False)
@@ -27,9 +32,14 @@ class Phase2Config:
 
     def __post_init__(self) -> None:
         self.repo_root = Path(self.repo_root).resolve()
+        ds = (
+            Path(self.data_root).resolve()
+            if self.data_root is not None
+            else self.repo_root
+        )
         self.phase1_dir = self.repo_root / "cache" / "eeg_eye_bridge" / "phase1"
         self.phase2_cache_dir = self.repo_root / "cache" / "eeg_eye_bridge" / "phase2"
-        self.eye_root = self.repo_root / "Eye" / "EYE"
+        self.eye_root = ds / "Eye" / "EYE"
         if self.table1_path is None:
-            p = self.repo_root / "Eye" / "Table1.csv"
+            p = ds / "Eye" / "Table1.csv"
             self.table1_path = p if p.exists() else None

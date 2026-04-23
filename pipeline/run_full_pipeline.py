@@ -36,6 +36,12 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
+def _dataset_root(repo: Path, cli: Path | None) -> Path:
+    from dataset_paths import resolve_dataset_root
+
+    return resolve_dataset_root(cli, fallback_repo_root=repo)
+
+
 def _py() -> str:
     return sys.executable
 
@@ -53,14 +59,18 @@ def _env(repo: Path) -> dict[str, str]:
 
 def main() -> None:
     repo = _repo_root()
+    src = repo / "src"
+    if str(src) not in sys.path:
+        sys.path.insert(0, str(src))
+
     p = argparse.ArgumentParser(
         description="Run full EEG–eye bridge pipeline with per-phase progress"
     )
     p.add_argument(
         "--data-root",
         type=Path,
-        default=repo,
-        help="Repository / data root (default: auto-detected repo root)",
+        default=None,
+        help="Dataset root (EEG/, Eye/, Gestures/). Default: env, iCloud path if present, else repo.",
     )
     p.add_argument(
         "--phase1-synthetic",
@@ -105,7 +115,7 @@ def main() -> None:
         help="Checkpoints directory for training",
     )
     args = p.parse_args()
-    data_root = Path(args.data_root).resolve()
+    data_root = _dataset_root(repo, args.data_root)
     env = _env(repo)
 
     phase1_cmd = [
@@ -113,6 +123,8 @@ def main() -> None:
         str(repo / "pipeline" / "phase1_run_export.py"),
         "--data_root",
         str(data_root),
+        "--workspace_root",
+        str(repo),
     ]
     if args.phase1_synthetic:
         phase1_cmd.append("--synthetic_only")
@@ -123,6 +135,8 @@ def main() -> None:
         _py(),
         str(repo / "pipeline" / "phase2_run_phase2.py"),
         "--repo-root",
+        str(repo),
+        "--data-root",
         str(data_root),
     ]
     if args.phase2_subset is not None:
@@ -132,7 +146,9 @@ def main() -> None:
         _py(),
         str(repo / "pipeline" / "phase3_build_rdms.py"),
         "--cache-root",
-        str(data_root / "cache" / "eeg_eye_bridge"),
+        str(repo / "cache" / "eeg_eye_bridge"),
+        "--dataset-root",
+        str(data_root),
     ]
     if args.phase3_max_trials is not None:
         phase3_cmd.extend(["--max-trials", str(args.phase3_max_trials)])

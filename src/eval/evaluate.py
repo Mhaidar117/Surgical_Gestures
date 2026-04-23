@@ -24,6 +24,7 @@ import numpy as np
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from dataset_paths import resolve_dataset_root
 from models.losses import compute_total_loss
 from eval.metrics import (
     compute_kinematics_metrics,
@@ -315,11 +316,16 @@ def save_aggregate_compatible_report(
 
 
 def main():
+    _repo_root = Path(__file__).resolve().parents[2]
     parser = argparse.ArgumentParser(description='Evaluate trained model')
     parser.add_argument('--checkpoint', type=str, required=True,
                         help='Path to model checkpoint')
-    parser.add_argument('--data_root', type=str, required=True,
-                        help='Data root directory')
+    parser.add_argument(
+        '--data_root',
+        type=str,
+        default=None,
+        help='Dataset root. Default: $SURGICAL_GESTURES_DATA_ROOT, else iCloud path if present, else repo.',
+    )
     parser.add_argument('--task', type=str, default='Knot_Tying',
                         help='Task name')
     parser.add_argument('--arm', type=str, default='PSM2',
@@ -336,6 +342,9 @@ def main():
                              '(requires --split fold_N).')
 
     args = parser.parse_args()
+    args.data_root = str(
+        resolve_dataset_root(args.data_root, fallback_repo_root=_repo_root)
+    )
 
     # Device selection
     if torch.backends.mps.is_available():

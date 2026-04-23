@@ -14,7 +14,14 @@ set -e  # Exit on error
 START_FOLD=${1:-1}
 END_FOLD=${2:-8}
 CONFIG="src/configs/brain_eye.yaml"
-DATA_ROOT="."
+_DEFAULT_SURGICAL_DATA_ROOT="/Users/michaelhaidar/Library/Mobile Documents/com~apple~CloudDocs/Documents/Vanderbilt/Fall_25/Surgical Robotics/Surgical_Gestures"
+if [ -n "${SURGICAL_GESTURES_DATA_ROOT:-}" ]; then
+    DATA_ROOT="$SURGICAL_GESTURES_DATA_ROOT"
+elif [ -d "$_DEFAULT_SURGICAL_DATA_ROOT" ]; then
+    DATA_ROOT="$_DEFAULT_SURGICAL_DATA_ROOT"
+else
+    DATA_ROOT="."
+fi
 BASE_OUTPUT_DIR="checkpoints/brain_eye"
 EVAL_OUTPUT_DIR="eval_results/brain_eye"
 

@@ -39,6 +39,8 @@ import torch
 import yaml
 
 REPO = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(REPO / "src"))
+from dataset_paths import resolve_dataset_root
 
 
 def _deep_set(d: Dict[str, Any], dotted_key: str, value: Any) -> None:
@@ -110,7 +112,7 @@ def _launch_run(
         sys.executable,
         str(REPO / 'src' / 'training' / 'train_vit_system.py'),
         '--config', str(cfg_path),
-        '--data_root', str(Path(args.data_root).resolve()),
+        '--data_root', str(Path(args.data_root)),
         '--task', args.task,
         '--split', args.split,
         '--split_family', args.split_family,
@@ -152,7 +154,12 @@ def main() -> int:
     p.add_argument('--sweep', type=str, required=True,
                    help='JSON dict of dotted-key -> list-of-values, e.g. '
                         '\'{"loss_weights.brain": [0.01, 0.05]}\'')
-    p.add_argument('--data_root', type=str, default='.')
+    p.add_argument(
+        '--data_root',
+        type=str,
+        default=None,
+        help='Dataset root (default: env / iCloud path / repo).',
+    )
     p.add_argument('--task', type=str, default='all')
     p.add_argument('--split', type=str, default='fold_1')
     p.add_argument('--split_family', type=str, default='louo',
@@ -164,6 +171,9 @@ def main() -> int:
                         'Common: total, gesture, skill, kin, brain_rsa.')
     p.add_argument('--dry_run', action='store_true')
     args = p.parse_args()
+    args.data_root = str(
+        resolve_dataset_root(args.data_root, fallback_repo_root=REPO)
+    )
 
     with open(args.base_config) as f:
         base_cfg = yaml.safe_load(f)

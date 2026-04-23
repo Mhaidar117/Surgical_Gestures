@@ -21,6 +21,7 @@ def build_all_candidate_rdms(
     *,
     metric: str = "one_minus_spearman",
     performance_scores_csv: Path | None = None,
+    dataset_root: Path | None = None,
     trial_ids: list[str] | None = None,
     max_trials: int | None = None,
 ) -> tuple[dict[str, RDMArtifact], dict[str, Any], list[str]]:
@@ -29,8 +30,13 @@ def build_all_candidate_rdms(
 
     Returns (artifacts_by_name, manifest_dict, warnings).
     """
-    repo_root = cache_root.parent.parent
-    perf_csv = performance_scores_csv or (repo_root / "Eye" / "PerformanceScores.csv")
+    if performance_scores_csv is not None:
+        perf_csv = performance_scores_csv
+    elif dataset_root is not None:
+        perf_csv = Path(dataset_root) / "Eye" / "PerformanceScores.csv"
+    else:
+        repo_root = cache_root.parent.parent
+        perf_csv = repo_root / "Eye" / "PerformanceScores.csv"
 
     records, load_warnings = load_all_trial_records(
         cache_root,
@@ -169,6 +175,7 @@ def run_phase3_pipeline(
     *,
     metric: str = "one_minus_spearman",
     performance_scores_csv: Path | None = None,
+    dataset_root: Path | None = None,
     trial_ids: list[str] | None = None,
     max_trials: int | None = None,
     write_outputs: bool = True,
@@ -177,6 +184,7 @@ def run_phase3_pipeline(
         cache_root,
         metric=metric,
         performance_scores_csv=performance_scores_csv,
+        dataset_root=dataset_root,
         trial_ids=trial_ids,
         max_trials=max_trials,
     )

@@ -13,6 +13,7 @@ import json
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent / 'src'))
 
+from dataset_paths import resolve_dataset_root
 from data.eeg_processor import EEGProcessor, compute_eeg_rdm_batch
 from data.sync_manager import SyncManager
 
@@ -170,8 +171,13 @@ def precompute_rdms_for_trial(
 
 def main():
     parser = argparse.ArgumentParser(description='Precompute EEG RDMs for offline use')
-    parser.add_argument('--data_root', type=str, required=True,
-                       help='Root directory containing Gestures/ and EEG/ folders')
+    _repo = Path(__file__).resolve().parent.parent
+    parser.add_argument(
+        '--data_root',
+        type=str,
+        default=None,
+        help='Dataset root (Gestures/, EEG/). Default: env / iCloud path / repo.',
+    )
     parser.add_argument('--task', type=str, default='Knot_Tying',
                        choices=['Knot_Tying', 'Needle_Passing', 'Suturing'],
                        help='Task name')
@@ -190,8 +196,8 @@ def main():
                        help='High cutoff frequency for bandpass filter')
     
     args = parser.parse_args()
-    
-    data_root = Path(args.data_root)
+
+    data_root = resolve_dataset_root(args.data_root, fallback_repo_root=_repo)
     cache_dir = Path(args.cache_dir)
     cache_dir.mkdir(parents=True, exist_ok=True)
     

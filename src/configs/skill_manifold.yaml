@@ -1,0 +1,33 @@
+# Knobs for the Gromov-Wasserstein skill-manifold comparison (Comparison B).
+# Every magic number used by src/skill_manifold lives here.
+
+seed: 1337
+n_perms: 1000              # permutation-null resamples for step 7 and the trial-level null
+gw_epsilon: 0.01           # entropic GW regularization for the 300x300 trial-level pass
+subsample_per_tier: 100    # per-tier subsample size for step 9 (300 total per side)
+trial_null_n_subsamples: 30  # B in the subsample-robustness loop (step 9c). 0 disables.
+gripper_open_eps: 1.0e-6   # d(gripper)/dt > eps counts as "opening"
+economy_clip: 1.0e6        # economy_of_motion is clipped to this max (straight-line ratio)
+try_filter: 1              # EEG/Eye side: keep only Try == this value
+gestures_pool:             # gestures retained in the JIGSAWS histogram (union across 3 tasks)
+  - G1
+  - G2
+  - G3
+  - G4
+  - G5
+  - G6
+  - G8
+  - G9
+  - G10
+  - G11
+  - G12
+  - G13
+  - G14
+  - G15
+osats_axes:                # columns 4..9 of meta_file_<Task>.txt, in order
+  - respect_for_tissue
+  - suture_needle_handling
+  - time_and_motion
+  - flow_of_operation
+  - overall_performance
+  - quality_of_final_product

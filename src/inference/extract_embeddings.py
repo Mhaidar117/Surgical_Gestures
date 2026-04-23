@@ -31,6 +31,7 @@ import sys
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+from dataset_paths import resolve_dataset_root
 from training.train_vit_system import EEGInformedViTModel
 from data import JIGSAWSViTDataset
 from data.split_loader import SplitLoader
@@ -339,8 +340,12 @@ def main():
                        help='Path to model checkpoint (required if not using --all_tasks)')
     parser.add_argument('--config', type=str, default=None,
                        help='Path to config file (optional, uses config from checkpoint)')
-    parser.add_argument('--data_root', type=str, required=True,
-                       help='Path to data root directory')
+    parser.add_argument(
+        '--data_root',
+        type=str,
+        default=None,
+        help='Dataset root. Default: $SURGICAL_GESTURES_DATA_ROOT, else iCloud path if present, else repo.',
+    )
     parser.add_argument('--task', type=str, default='Knot_Tying',
                        help='Task name (ignored if --all_tasks)')
     parser.add_argument('--split', type=str, default='fold_1',
@@ -363,6 +368,10 @@ def main():
                        help='Base directory for checkpoints (used with --all_tasks)')
 
     args = parser.parse_args()
+    _repo_root = Path(__file__).resolve().parents[2]
+    args.data_root = str(
+        resolve_dataset_root(args.data_root, fallback_repo_root=_repo_root)
+    )
 
     # Device selection
     if torch.backends.mps.is_available():

@@ -11,6 +11,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(_REPO_ROOT / "src") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "src"))
 
+from dataset_paths import resolve_dataset_root
+
 from eeg_eye_bridge.phase3_rdm.paths import default_cache_root
 from eeg_eye_bridge.phase3_rdm.pipeline import run_phase3_pipeline
 
@@ -42,6 +44,12 @@ def main() -> None:
         help="Path to Eye/PerformanceScores.csv",
     )
     parser.add_argument(
+        "--dataset-root",
+        type=str,
+        default=None,
+        help="Dataset root for default PerformanceScores.csv (when --performance-csv omitted)",
+    )
+    parser.add_argument(
         "--max-trials",
         type=int,
         default=None,
@@ -59,11 +67,15 @@ def main() -> None:
         cache_root = Path(args.output_dir)
 
     perf = Path(args.performance_csv) if args.performance_csv else None
+    dataset_root = resolve_dataset_root(
+        args.dataset_root, fallback_repo_root=_REPO_ROOT
+    )
 
     _, manifest, warnings = run_phase3_pipeline(
         cache_root,
         metric=args.metric,
         performance_scores_csv=perf,
+        dataset_root=dataset_root,
         max_trials=args.max_trials,
         write_outputs=not args.dry_run,
     )

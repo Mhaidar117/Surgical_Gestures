@@ -37,6 +37,7 @@ psutil>=5.9.0  # optional: RSS reporting in misc/debug_phase1_load.py
 multipledispatch>=0.6.0
 barbar>=0.2.1
 tqdm>=4.65.0
+POT>=0.9.0  # Gromov-Wasserstein in skill_manifold (Comparison B)
 
 # EEG Processing (choose one)
 mne>=1.5.0  # Recommended for EEG processing
