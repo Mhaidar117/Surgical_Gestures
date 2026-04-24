@@ -676,6 +676,268 @@ def modality_split_analysis(
     return out
 
 
+def jigsaws_modality_split_analysis(
+    *,
+    features_j_full: np.ndarray,
+    j_cols_full: Sequence[str],
+    modality_columns: Dict[str, Sequence[str]],
+    tiers_j_tertile: np.ndarray,
+    tiers_j_fixed: np.ndarray,
+    features_e: np.ndarray,
+    tiers_e_tertile: np.ndarray,
+    tiers_e_fixed: np.ndarray,
+    tier_names: Sequence[str],
+    epsilon: float,
+    n_perms: int,
+    n_bootstraps: int,
+    seed: int,
+    entropic_gw_fn: Optional[
+        Callable[[np.ndarray, np.ndarray, float], tuple[float, np.ndarray]]] = None,
+    pairwise_rdm_fn: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+) -> Dict[str, object]:
+    """Mirror of `modality_split_analysis` with the JIGSAWS side as the
+    ablation target. The Mimic side stays as a fixed full combined manifold;
+    each JIGSAWS-side modality subset (gestures, kinematics, ...) is run
+    against it under both tertile and fixed-cutoff binning.
+
+    Returns the same schema as `modality_split_analysis` but with the roles
+    swapped conceptually -- per-modality primary/bootstrap/verdict for the
+    JIGSAWS feature subsets.
+    """
+    col_to_idx = {c: i for i, c in enumerate(j_cols_full)}
+    mod_order = list(modality_columns.keys())
+
+    def _seed_for(mod_idx: int, bin_idx: int) -> int:
+        # Offset by 100_000 so seeds do not collide with the Mimic-side call.
+        return int(seed) + 100_000 + (mod_idx + 1) * 10_000 + (bin_idx + 1) * 100
+
+    def _run_one(features_j_sub: np.ndarray,
+                 tj: np.ndarray, te: np.ndarray,
+                 seed_primary: int, seed_bootstrap: int) -> Dict[str, object]:
+        primary = trial_level_block_null_all_trials(
+            features_j=features_j_sub, tiers_j=tj,
+            features_e=features_e, tiers_e=te,
+            tier_names=tier_names, epsilon=float(epsilon),
+            n_perms=int(n_perms), seed=seed_primary,
+            entropic_gw_fn=entropic_gw_fn, pairwise_rdm_fn=pairwise_rdm_fn,
+        )
+        bootstrap = subsample_robustness_stratified(
+            features_j=features_j_sub, tiers_j=tj,
+            features_e=features_e, tiers_e=te,
+            tier_names=tier_names, epsilon=float(epsilon),
+            n_perms=max(200, int(n_perms) // 5),
+            n_bootstraps=int(n_bootstraps), seed=seed_bootstrap,
+            entropic_gw_fn=entropic_gw_fn, pairwise_rdm_fn=pairwise_rdm_fn,
+        )
+        verdict = stratified_bootstrap_verdict(bootstrap, tier_names)
+        return {"primary": primary, "bootstrap": bootstrap, "verdict": verdict}
+
+    out: Dict[str, object] = {}
+    for m_idx, mod in enumerate(mod_order):
+        cols = list(modality_columns[mod])
+        missing = [c for c in cols if c not in col_to_idx]
+        if missing:
+            raise ValueError(
+                f"modality {mod!r} references unknown columns: {missing[:3]}...")
+        idx = np.array([col_to_idx[c] for c in cols], dtype=np.int64)
+        features_j_sub = features_j_full[:, idx]
+
+        fixed = _run_one(
+            features_j_sub, tiers_j_fixed, tiers_e_fixed,
+            seed_primary=_seed_for(m_idx, 0),
+            seed_bootstrap=_seed_for(m_idx, 0) + 1,
+        )
+        tertile = _run_one(
+            features_j_sub, tiers_j_tertile, tiers_e_tertile,
+            seed_primary=_seed_for(m_idx, 1),
+            seed_bootstrap=_seed_for(m_idx, 1) + 1,
+        )
+        out[mod] = {
+            "fixed": fixed,
+            "tertile": tertile,
+            "jigsaws_feature_dim": int(len(cols)),
+        }
+
+    out["_meta"] = {
+        "mimic_feature_dim": int(features_e.shape[1]),
+        "n_bootstraps": int(n_bootstraps),
+        "epsilon": float(epsilon),
+        "tier_names": list(tier_names),
+        "modalities": mod_order,
+    }
+    return out
+
+
+# --------- P1: EEG baseline/pc correlation diagnostic -----------------------
+
+def eeg_baseline_pc_correlation(
+    features_e_full: np.ndarray,
+    baseline_cols: Sequence[str],
+    pc_cols: Sequence[str],
+    e_cols_full: Sequence[str],
+) -> Dict[str, object]:
+    """Per-trial Pearson correlation between the EEG baseline and predictive-
+    coding encoder means, plus the mean/std/abs-median of that distribution.
+
+    The two EEG encoders consume the same Phase 1 windows so they are NOT
+    independent evidence streams. This diagnostic surfaces the magnitude of
+    that dependence so downstream per-modality verdicts can be read with the
+    right caveat.
+    """
+    col_to_idx = {c: i for i, c in enumerate(e_cols_full)}
+    b_idx = np.array([col_to_idx[c] for c in baseline_cols], dtype=np.int64)
+    p_idx = np.array([col_to_idx[c] for c in pc_cols], dtype=np.int64)
+    B = features_e_full[:, b_idx]
+    P = features_e_full[:, p_idx]
+    # Per-trial Pearson correlation = cov(B_i, P_i) / (std(B_i) * std(P_i)).
+    # Features are pre-z-scored across trials, not across EEG dims; compute
+    # the per-trial statistic directly.
+    Bm = B - B.mean(axis=1, keepdims=True)
+    Pm = P - P.mean(axis=1, keepdims=True)
+    num = (Bm * Pm).sum(axis=1)
+    den = np.sqrt((Bm ** 2).sum(axis=1) * (Pm ** 2).sum(axis=1))
+    rho = np.where(den > 1e-12, num / den, 0.0)
+    return {
+        "per_trial_pearson_r": rho.astype(np.float64),
+        "mean": float(rho.mean()),
+        "median": float(np.median(rho)),
+        "median_abs": float(np.median(np.abs(rho))),
+        "std": float(rho.std()),
+        "p05": float(np.quantile(rho, 0.05)),
+        "p95": float(np.quantile(rho, 0.95)),
+        "frac_abs_gt_0p5": float((np.abs(rho) > 0.5).mean()),
+        "n_trials": int(rho.size),
+    }
+
+
+# --------- P3: pooled-128 random-split null ---------------------------------
+
+def pooled_eeg_random_split_null(
+    *,
+    features_j: np.ndarray,
+    tiers_j: np.ndarray,
+    features_e_full: np.ndarray,
+    e_cols_full: Sequence[str],
+    eeg_combined_cols: Sequence[str],      # all 128 baseline+pc columns
+    half_size: int,                         # 64 (how many cols per random half)
+    tiers_e: np.ndarray,
+    tier_names: Sequence[str],
+    epsilon: float,
+    n_perms: int,
+    n_random_splits: int,
+    seed: int,
+    entropic_gw_fn: Optional[
+        Callable[[np.ndarray, np.ndarray, float], tuple[float, np.ndarray]]] = None,
+    pairwise_rdm_fn: Optional[Callable[[np.ndarray], np.ndarray]] = None,
+) -> Dict[str, object]:
+    """Negative control for the baseline-vs-pc modality contrast.
+
+    If the Step 10 difference between baseline trace_z and pc trace_z is
+    genuinely "predictive-coding carries more signal than baseline," that
+    signed difference should be *larger* than most random 64+64 splits of
+    the combined 128 EEG dims. If the observed difference falls inside the
+    random-split distribution, the split is statistically uninformative --
+    any 64-column draw gives roughly the same per-cell z.
+
+    Uses `trial_level_block_null_all_trials` under the hood with a fresh
+    seed per random split. The coupling null is small (n_perms capped at
+    200 for speed) since this block is a sensitivity check, not a primary
+    significance test.
+    """
+    col_to_idx = {c: i for i, c in enumerate(e_cols_full)}
+    combined_idx = np.array([col_to_idx[c] for c in eeg_combined_cols],
+                            dtype=np.int64)
+    n_combined = combined_idx.size
+    if half_size * 2 > n_combined:
+        raise ValueError(
+            f"half_size*2 ({half_size*2}) exceeds combined EEG dims ({n_combined})")
+
+    rng = np.random.default_rng(seed)
+    deltas = np.empty(n_random_splits, dtype=np.float64)
+    z_a = np.empty(n_random_splits, dtype=np.float64)
+    z_b = np.empty(n_random_splits, dtype=np.float64)
+
+    for k in range(n_random_splits):
+        perm = rng.permutation(combined_idx)
+        half_a = perm[:half_size]
+        half_b = perm[half_size:2 * half_size]
+
+        primary_a = trial_level_block_null_all_trials(
+            features_j=features_j, tiers_j=tiers_j,
+            features_e=features_e_full[:, half_a], tiers_e=tiers_e,
+            tier_names=tier_names, epsilon=float(epsilon),
+            n_perms=min(int(n_perms), 200),
+            seed=int(rng.integers(0, 2**31 - 1)),
+            entropic_gw_fn=entropic_gw_fn, pairwise_rdm_fn=pairwise_rdm_fn,
+        )
+        primary_b = trial_level_block_null_all_trials(
+            features_j=features_j, tiers_j=tiers_j,
+            features_e=features_e_full[:, half_b], tiers_e=tiers_e,
+            tier_names=tier_names, epsilon=float(epsilon),
+            n_perms=min(int(n_perms), 200),
+            seed=int(rng.integers(0, 2**31 - 1)),
+            entropic_gw_fn=entropic_gw_fn, pairwise_rdm_fn=pairwise_rdm_fn,
+        )
+        z_a[k] = float(primary_a["z_score"])
+        z_b[k] = float(primary_b["z_score"])
+        deltas[k] = z_a[k] - z_b[k]
+
+    return {
+        "n_random_splits": int(n_random_splits),
+        "half_size": int(half_size),
+        "z_a": z_a, "z_b": z_b,
+        "delta_distribution": deltas,   # signed z_a - z_b across random draws
+        "delta_abs_median": float(np.median(np.abs(deltas))),
+        "delta_abs_p95": float(np.quantile(np.abs(deltas), 0.95)),
+        "delta_median": float(np.median(deltas)),
+        "delta_p05": float(np.quantile(deltas, 0.05)),
+        "delta_p95": float(np.quantile(deltas, 0.95)),
+    }
+
+
+# --------- P4: coupling-matrix diagnostics (per Mimic modality) -------------
+
+def coupling_matrix_diagnostics(
+    coupling: np.ndarray,
+    features_e_sub: np.ndarray,
+    *,
+    near_duplicate_cos_eps: float = 1e-4,
+) -> Dict[str, float]:
+    """Diagnostics for a single entropic-GW coupling: pre-renorm marginal
+    drift, numerical rank of the cosine-distance cost matrix, and count of
+    near-duplicate Mimic rows under cosine distance. Intended as a targeted
+    check for the Step 10 eye-only coupling which was a suspected outlier.
+    """
+    T = np.asarray(coupling, dtype=np.float64)
+    row_drift = float(np.max(np.abs(T.sum(axis=1) - 1.0 / T.shape[0])))
+    col_drift = float(np.max(np.abs(T.sum(axis=0) - 1.0 / T.shape[1])))
+
+    norms = np.linalg.norm(features_e_sub, axis=1)
+    mask = norms < 1e-12
+    feats = features_e_sub.astype(np.float64).copy()
+    if mask.any():
+        feats[mask] = 1e-12
+    # Pairwise cosine similarity, count near-duplicates above the threshold.
+    normed = feats / np.linalg.norm(feats, axis=1, keepdims=True)
+    S = normed @ normed.T
+    iu, ju = np.triu_indices(S.shape[0], k=1)
+    near_dup = int((1.0 - S[iu, ju] < near_duplicate_cos_eps).sum())
+
+    # Rank of the distance matrix up to numerical tolerance.
+    D = 1.0 - S
+    rank = int(np.linalg.matrix_rank(D, tol=1e-6))
+    return {
+        "coupling_row_drift": row_drift,
+        "coupling_col_drift": col_drift,
+        "distance_rank": rank,
+        "near_duplicate_pairs": near_dup,
+        "total_pairs": int(iu.size),
+        "near_duplicate_fraction": float(near_dup / max(1, iu.size)),
+        "n_trials": int(features_e_sub.shape[0]),
+        "n_features": int(features_e_sub.shape[1]),
+    }
+
+
 # --------- epsilon sensitivity (optional, no null) ---------------------------
 
 def epsilon_sensitivity(

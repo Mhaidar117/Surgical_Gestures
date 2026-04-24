@@ -2,6 +2,8 @@
 
 Vision Transformer–based models for **JIGSAWS** surgical video: predict **robot kinematics**, **gesture** labels (15 classes), and **skill** level (Novice / Intermediate / Expert), with optional **neural alignment** via an **EEG–Eye Bridge** (RDM targets, RSA loss). Evaluation follows **8-fold Leave-One-User-Out (LOUO)** across surgeons.
 
+A parallel **Skill-Manifold Comparison** pipeline (Gromov–Wasserstein between JIGSAWS and the EEG/Eye simulator) sits alongside the trainer and asks whether the two datasets organize surgical skill into compatible geometries, with permutation nulls, stratified bootstraps, and per-modality splits.
+
 **Documentation in this repository:** [`README.md`](README.md) (this file) and [`CLAUDE.md`](CLAUDE.md) (architecture, configs, EEG–eye phases, conventions). Deeper or personal notes can live in a local `docs/` directory if you create one; it is gitignored by default.
 
 ---
@@ -130,6 +132,49 @@ Caches go under `cache/eeg_eye_bridge/`. Phase details and brain modes are docum
 | [`run_ablation_study.ps1`](run_ablation_study.ps1) | Windows: four configs × three tasks × eight folds → `checkpoints/<config>/<task>/fold_n/` |
 | [`misc/run_ablations.sh`](misc/run_ablations.sh) | Unix (legacy): focused ablations (`brain`, `lambda`, `finetune`, `layers`, or `all`) into `checkpoints/ablations/` |
 
+Arbitrary **hyperparameter sweeps** are driven through [`pipeline/run_hparam_sweep.py`](pipeline/run_hparam_sweep.py), which takes a base YAML and a JSON sweep spec (e.g. `'{"loss_weights.brain": [0.01, 0.05, 0.1]}'`) and writes ranked val-metric summaries alongside each run's `best_model.pth`.
+
+---
+
+## Skill-manifold comparison (Gromov–Wasserstein)
+
+A separate analysis pipeline that compares the per-trial skill geometry of JIGSAWS against the EEG/Eye simulator. It produces a headline GW distance, a tier-shuffle permutation null, OSATS per-axis breakdowns, trial-level block-diagonality tests with stratified bootstraps, and per-modality splits on both sides (`eeg_baseline` / `eeg_predictive_coding` / `eye` on the Mimic side; `gestures` / `kinematics` on the JIGSAWS side). Two framings:
+
+- **Comparison B — skill manifold:** JIGSAWS tiered by OSATS `grs_total`, Mimic by `performance`.
+- **Comparison A — practice manifold:** JIGSAWS tiered by self-reported E/I/N, Mimic by per-subject experience tertile.
+
+```bash
+export PYTHONPATH=src
+python pipeline/skill_manifold_gw.py                  # full run
+python pipeline/skill_manifold_gw.py --smoke          # 10% subsample smoke pass
+python pipeline/skill_manifold_gw.py --n_perms 200    # faster null
+```
+
+Outputs land in [`reports/skill_manifold/`](reports/skill_manifold): `report_comparison_B.md`, `results_comparison_B.json`, and plots under `plots/`. An interactive companion is [`pipeline/skills_manifold.ipynb`](pipeline/skills_manifold.ipynb). Knobs (seed, `n_perms`, `gw_epsilon`, subsample / bootstrap counts, gesture pool, OSATS axes) live in [`src/configs/skill_manifold.yaml`](src/configs/skill_manifold.yaml); the 27-task-ID → 9-module mapping is in [`src/configs/skill_manifold_task_modules.yaml`](src/configs/skill_manifold_task_modules.yaml).
+
+See [`CLAUDE.md`](CLAUDE.md#skill-manifold-comparison-gromovwasserstein) for the full stage-by-stage description. The Step 10 design is critiqued in [`pipeline/skills_manifold_modality_split_postmortem.txt`](pipeline/skills_manifold_modality_split_postmortem.txt).
+
+---
+
+## Post-hoc representation analyses
+
+Probe what a trained checkpoint actually encodes:
+
+```bash
+# Skill-separability metrics (within vs between, silhouette) on one fold
+python pipeline/skill_manifold_analysis.py \
+    --checkpoint checkpoints/brain_eye/all/fold_1/best_model.pth \
+    --data_root . --task all --split fold_1
+
+# Ridge + k-NN probes aggregated across folds (skill, gesture, task, surgeon)
+python pipeline/representation_probe.py \
+    --aggregate_root checkpoints/brain_eye/all \
+    --data_root . --task all --split_family louo \
+    --output_dir analysis/representation_probe --stem brain_eye
+```
+
+Surgeon probe is interpreted as *lower is better* — a high surgeon accuracy means the model memorized motor style rather than generalizing across operators.
+
 ---
 
 ## EEG–eye bridge tests
@@ -141,6 +186,13 @@ python -m pytest tests/eeg_eye_bridge/phase2/test_phase2_eye_consistency.py -v
 python -m pytest tests/eeg_eye_bridge/phase3/test_phase3_rdms.py -v
 python tests/eeg_eye_bridge/phase4/test_phase4_vit_regularizer.py
 python tests/eeg_eye_bridge/test_phase5_integration_coordinator.py
+```
+
+## Skill-manifold tests
+
+```bash
+export PYTHONPATH=src
+python -m pytest tests/skill_manifold -v
 ```
 
 ---

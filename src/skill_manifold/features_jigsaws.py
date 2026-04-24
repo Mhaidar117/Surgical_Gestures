@@ -248,6 +248,30 @@ def feature_column_names(gesture_pool: Sequence[str]) -> List[str]:
     return names
 
 
+def jigsaws_modality_columns(gesture_pool: Sequence[str]) -> dict:
+    """Partition the JIGSAWS feature vector by upstream modality, mirroring
+    `mimic_modality_columns` on the Mimic side. Layout from
+    `feature_column_names`:
+
+      - len(gesture_pool) cols prefixed ``gest_``  (gesture histogram)
+      - 24 cols prefixed ``SL_`` / ``SR_``         (Slave-arm kinematics summary)
+      -  1 col ``duration_frames``                  (trivial 1-d; excluded from
+         the split because cosine distance on 1-d vectors is degenerate)
+
+    Returns a dict with two keys: ``gestures`` and ``kinematics``. The
+    single-column duration feature is intentionally omitted from the split
+    (see note above), so the partition is complete for the 38-d non-duration
+    subset and the orchestrator is responsible for not asking this helper to
+    emit a ``duration`` modality.
+    """
+    all_cols = feature_column_names(gesture_pool)
+    return {
+        "gestures":    [c for c in all_cols if c.startswith("gest_")],
+        "kinematics":  [c for c in all_cols
+                         if c.startswith("SL_") or c.startswith("SR_")],
+    }
+
+
 def build_jigsaws_feature_frame(data_root: Path,
                                 gesture_pool: Sequence[str],
                                 tasks: Iterable[str] = JIGSAWS_TASKS,

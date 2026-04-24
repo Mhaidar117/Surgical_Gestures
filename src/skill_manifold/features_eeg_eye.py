@@ -154,10 +154,22 @@ def build_eeg_eye_feature_frame(
 
     Returns a DataFrame with columns `feature_column_names()` plus metadata
     columns: trial_id, subject_id, task_id, task_module, age, dominant_hand,
-    performance.
+    performance, experience_trials.
+
+    `experience_trials` is the number of non-first-try attempts the subject
+    completed across the whole dataset -- our stand-in for "experience hours"
+    in Comparison A (the practice-manifold comparison). PerformanceScores.csv
+    has no explicit hours column; the non-first-try count is the cleanest
+    practice-depth signal available per subject.
     """
-    scores = load_performance_scores(performance_scores_csv(data_root))
-    scores = scores[scores["try_num"] == try_filter].reset_index(drop=True)
+    full_scores = load_performance_scores(performance_scores_csv(data_root))
+    # Per-subject non-first-try count, computed BEFORE filtering by try_num.
+    experience_by_subject = (
+        full_scores.loc[full_scores["try_num"] > 1]
+                   .groupby("subject_id").size()
+                   .astype(int).to_dict()
+    )
+    scores = full_scores[full_scores["try_num"] == try_filter].reset_index(drop=True)
 
     p1_dir = phase1_trials_dir(data_root)
     p2_dir = phase2_summaries_dir(data_root)
@@ -186,14 +198,16 @@ def build_eeg_eye_feature_frame(
                 f"feature dim {feat.size} != columns {len(feat_cols)}")
 
         module = task_module_map.get(int(r["task_id"]), "unknown")
+        subj = int(r["subject_id"])
         record = {
             "trial_id": tid,
-            "subject_id": int(r["subject_id"]),
+            "subject_id": subj,
             "task_id": int(r["task_id"]),
             "task_module": module,
             "age": float(r["age"]),
             "dominant_hand": str(r["dominant_hand"]),
             "performance": float(r["performance"]),
+            "experience_trials": int(experience_by_subject.get(subj, 0)),
         }
         record.update(dict(zip(feat_cols, feat)))
         rows.append(record)

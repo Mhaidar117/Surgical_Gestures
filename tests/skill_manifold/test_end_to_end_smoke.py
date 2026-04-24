@@ -44,6 +44,8 @@ def test_pipeline_end_to_end(synthetic_data_root: Path, tmp_path, monkeypatch):
     cfg["n_perms"] = 20
     cfg["subsample_per_tier"] = 10
     cfg["trial_null_n_subsamples"] = 3
+    cfg["modality_split_n_perms"] = 20
+    cfg["modality_split_n_bootstraps"] = 2
 
     results = orch.run(
         cfg,

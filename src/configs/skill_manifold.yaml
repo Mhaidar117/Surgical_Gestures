@@ -6,6 +6,11 @@ n_perms: 1000              # permutation-null resamples for step 7 and the trial
 gw_epsilon: 0.01           # entropic GW regularization for the 300x300 trial-level pass
 subsample_per_tier: 100    # per-tier subsample size for step 9 (300 total per side)
 trial_null_n_subsamples: 30  # B in the subsample-robustness loop (step 9c). 0 disables.
+# Step 10/11 modality split: one primary eGW + B stratified bootstraps per (modality × binning).
+# Defaults here are much smaller than trial_null_n_subsamples because that cost multiplies
+# (3 modalities × 2 binnings × (1 + B) full-trial eGW). Raise for publication runs.
+modality_split_n_bootstraps: 8
+modality_split_n_perms: 400  # if omitted, uses n_perms
 gripper_open_eps: 1.0e-6   # d(gripper)/dt > eps counts as "opening"
 economy_clip: 1.0e6        # economy_of_motion is clipped to this max (straight-line ratio)
 try_filter: 1              # EEG/Eye side: keep only Try == this value

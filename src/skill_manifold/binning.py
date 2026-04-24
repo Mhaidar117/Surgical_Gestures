@@ -68,3 +68,19 @@ def assign_fixed_tier(values: Sequence[float],
     tier[v < low_threshold] = TIER_NAMES[0]
     tier[v > high_threshold] = TIER_NAMES[2]
     return tier
+
+
+# JIGSAWS self-reported skill label maps directly to Low/Mid/High so that
+# Comparison A can reuse the tier-name machinery unchanged.
+#   N (Novice)       -> Low
+#   I (Intermediate) -> Mid
+#   E (Expert)       -> High
+JIGSAWS_SKILL_TO_TIER = {"N": TIER_NAMES[0], "I": TIER_NAMES[1], "E": TIER_NAMES[2]}
+
+
+def assign_jigsaws_skill_tier(skill_codes: Sequence[str]) -> np.ndarray:
+    """Map the JIGSAWS E/I/N `skill` column onto Low/Mid/High tier labels."""
+    codes = np.asarray(skill_codes, dtype=object)
+    tier = np.array([JIGSAWS_SKILL_TO_TIER.get(str(s), TIER_NAMES[1]) for s in codes],
+                    dtype=object)
+    return tier

@@ -1,0 +1,145 @@
+================================================================================
+POSTMORTEM: Multimodal / “shared skill manifold” test in skills_manifold.ipynb
+================================================================================
+Scope: Step 10 (“Mimic-side modality split”) and supporting code in
+  src/skill_manifold/trial_null.py::modality_split_analysis
+  src/skill_manifold/features_eeg_eye.py::mimic_modality_columns
+Date of review: 2026-04-23
+
+--------------------------------------------------------------------------------
+1. What the notebook actually tests (vs. a literal 3-way shared manifold)
+--------------------------------------------------------------------------------
+
+The notebook headline is a *two-domain* comparison:
+  - Domain A: JIGSAWS — one fixed 39-dimensional feature vector per trial
+    (14-d gesture histogram + 12+12 arm summary scalars + duration), after
+    nuisance regression and tier labels from GRS.
+  - Domain B: Mimic — 146-d vector split into three *disjoint* column groups:
+    eeg_baseline (64), eeg_predictive_coding (64), eye (18).
+
+Step 10 does NOT build one latent space shared by EEG, eye, and gestures.
+It runs three separate analyses: each Mimic subset is compared, via the same
+trial-level entropic Gromov–Wasserstein + block-mass permutation null and
+stratified bootstrap, against the *same full* JIGSAWS manifold.
+
+Interpretation aid in the notebook (“if several modalities are GO, signal is
+shared”) refers to correlation of *outcomes* across Mimic streams, not to a
+single estimated joint manifold or a three-way GW factorization.
+
+If the scientific question is strictly “EEG vs EYE vs Gestures as three equal
+modalities,” the current design is asymmetric: Gestures (and kinematics/time)
+live only inside the JIGSAWS composite and are never ablated the way Mimic
+streams are. A symmetric analogue would partition JIGSAWS columns (e.g.
+gest_* vs SL_/SR_* kinematics vs duration) and run the same localization
+logic on that side, or run pairwise GW across three *separate* domain-specific
+RDMs with a clear three-way hypothesis.
+
+--------------------------------------------------------------------------------
+2. Code and methodology — what looks sound
+--------------------------------------------------------------------------------
+
+- Column partition: mimic_modality_columns() matches feature_column_names()
+  layout (eeg_base_*, eeg_pc_*, eye_*); disjoint and complete — no orphaned
+  columns.
+
+- Using column subsets of the already residualized Mimic matrix: nuisance OLS
+  was fit per feature column with the same design matrix; taking a subset of
+  residual columns is still the correct residual for those coordinates (not a
+  re-fit that would change the subspace).
+
+- trial_null.trial_level_block_null_all_trials: coupling is fixed; null
+  shuffles tier labels on each side; expected trace uses observed tier
+  proportions — appropriate for unbalanced NJ vs NE and unbalanced tiers.
+
+- subsample_robustness_stratified preserves tier counts per bootstrap replicate,
+  which matters for fixed-cutoff binning on JIGSAWS.
+
+- Prefix-based modality split is deterministic and easy to audit.
+
+--------------------------------------------------------------------------------
+3. Issues, limitations, and risks
+--------------------------------------------------------------------------------
+
+A) Conceptual / inferential
+   - EEG baseline and predictive-coding embeddings come from the same Phase 1
+     trial and are not independent. Strong correlation can make “localization”
+     to one EEG stream versus the other unstable or hard to interpret as
+     separate biological signals.
+   - Step 10 multiplies comparisons (3 Mimic streams × 2 binnings × diagonal
+     cells). Per-modality verdicts use an internal rule
+     (stratified_bootstrap_verdict), but there is no explicit family-wise error
+     control *across* modalities when claiming “only stream X drives the
+     effect.”
+   - Eye block has 18 features vs 64 per EEG block; geometry of cosine RDMs
+     and GW solutions are not directly comparable across blocks (different
+     intrinsic dimension and noise floor). High or low verdicts across streams
+     reflect procedure consistency, not calibrated effect sizes.
+
+B) JIGSAWS side not modality-split
+   - Gesture histogram and kinematics jointly define “skill geometry” on the
+     robot side. Any Mimic alignment could be driven by kinematic structure
+     that covaries with gestures, or vice versa — Step 10 cannot localize
+     which *component* of JIGSAWS is responsible.
+
+C) Notebook / environment
+   - The first code cell’s saved outputs show repeated
+     AttributeError: 'MessageFactory' object has no attribute 'GetPrototype'
+     (typical protobuf / tensorboard / autoreload stack mismatch), then success.
+     This pollutes the notebook and may confuse reruns; it is an environment
+     dependency issue, not logic in skill_manifold.
+
+D) Runtime / parameters
+   - modality_split_analysis uses n_perms=max(200, n_perms//5) for the
+     stratified bootstrap inner loop (primary still uses full n_perms). This
+     trades accuracy for speed; documented implicitly — be aware when borderline
+     p-values matter.
+
+--------------------------------------------------------------------------------
+4. Observed run snapshot (from notebook outputs, Step 10)
+--------------------------------------------------------------------------------
+
+Printed modality dims: eeg_baseline=64, eeg_predictive_coding=64, eye=18.
+
+Example pattern in the saved table: eeg_predictive_coding showed stronger
+primary trace z and p than eeg_baseline for fixed binning, but stratified
+bootstrap per-cell summaries still yielded NO-GO under the pre-specified
+GO/CAUTION/NO-GO rule (medians and fractions of positive z did not meet all
+thresholds). All three streams were NO-GO in that run for the combined rule —
+consistent with the notebook’s own “weak-or-absent population effect” branch.
+
+(This is dataset- and seed-specific; the postmortem is about validity of the
+test, not reproducing p-values.)
+
+--------------------------------------------------------------------------------
+5. Recommendations (if you extend this line of work)
+--------------------------------------------------------------------------------
+
+1. Add an optional JIGSAWS-side column grouping (gesture-only vs kin-only vs
+   duration) mirrored after mimic_modality_columns, and optionally run
+   “full Mimic vs subset J” for symmetry.
+
+2. If interpreting EEG baseline vs PC as distinct evidence, report their
+   cross-trial correlation or partial overlap of variance explained, and
+   consider a joint EEG block null (e.g. random 64-column draws from the
+   pooled 128 EEG dims) as a negative control.
+
+3. Pin protobuf / notebook dependencies or drop %load_ext autoreload in the
+   first cell for publication runs to avoid spurious tracebacks.
+
+4. State explicitly that “three modalities” in the manuscript means “three
+   Mimic feature groups vs one robot composite,” unless you add the symmetric
+   JIGSAWS splits above.
+
+--------------------------------------------------------------------------------
+6. Bottom line
+--------------------------------------------------------------------------------
+
+The implementation faithfully encodes the Step 10 design: isolate Mimic
+feature groups and test cross-dataset GW alignment against a fixed JIGSAWS
+skill geometry. The main gap relative to a naive reading of “EEG, EYE, and
+Gestures share a manifold” is structural — gestures are not isolated on the
+robot side, there is no single shared latent space, and the two EEG encoders
+are not statistically independent channels. The core trial-level null and
+stratified bootstrap machinery appear consistent with the documented intent.
+
+================================================================================

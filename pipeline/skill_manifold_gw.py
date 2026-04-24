@@ -50,12 +50,17 @@ from skill_manifold.gw import (  # noqa: E402
     permutation_null_centroid,
 )
 from skill_manifold.trial_null import (  # noqa: E402
-    BONFERRONI_Z_THREE_CELLS, epsilon_sensitivity, modality_split_analysis,
-    stratified_bootstrap_verdict, subsample_robustness,
-    subsample_robustness_stratified, trial_level_block_null,
-    trial_level_block_null_all_trials,
+    BONFERRONI_Z_THREE_CELLS, coupling_matrix_diagnostics,
+    eeg_baseline_pc_correlation, epsilon_sensitivity,
+    jigsaws_modality_split_analysis, modality_split_analysis,
+    pooled_eeg_random_split_null, stratified_bootstrap_verdict,
+    subsample_robustness, subsample_robustness_stratified,
+    trial_level_block_null, trial_level_block_null_all_trials,
 )
-from skill_manifold.binning import assign_fixed_tier  # noqa: E402
+from skill_manifold.binning import (  # noqa: E402
+    assign_fixed_tier, assign_jigsaws_skill_tier,
+)
+from skill_manifold.features_jigsaws import jigsaws_modality_columns  # noqa: E402
 
 log = logging.getLogger("skill_manifold_gw")
 
@@ -268,13 +273,58 @@ def _serialize_stratified(result: dict) -> dict:
     }
 
 
-def _serialize_modality_split(mod_res: dict) -> dict:
-    """Render `modality_split_analysis(...)` into JSON-safe native types."""
+def _eeg_corr_plot(corr: dict, path: Path) -> None:
+    """Histogram of per-trial Pearson r between mean baseline and mean pc EEG."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    r = np.asarray(corr["per_trial_pearson_r"])
+    fig, ax = plt.subplots(figsize=(6, 3.6))
+    ax.hist(r, bins=30, color="#4575b4", edgecolor="white")
+    ax.axvline(float(corr["median"]), color="red", linestyle="--",
+               label=f"median = {corr['median']:+.2f}")
+    ax.axvline(0, color="black", linewidth=0.7)
+    ax.set_xlabel("per-trial Pearson r  (baseline mean vs pc mean)")
+    ax.set_ylabel("trials")
+    ax.set_title(
+        f"EEG baseline/pc correlation (median |r| = {corr['median_abs']:.2f}, "
+        f"frac |r| > 0.5 = {corr['frac_abs_gt_0p5']:.2f})")
+    ax.legend(fontsize=8)
+    fig.tight_layout(); fig.savefig(path, dpi=120); plt.close(fig)
+
+
+def _eeg_pooled_plot(pooled: dict, path: Path) -> None:
+    """Histogram of the signed trace-z delta under random 64+64 EEG splits,
+    with the observed baseline-minus-pc delta marked."""
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    null = np.asarray(pooled["delta_distribution"])
+    obs = float(pooled["observed_delta_baseline_minus_pc"])
+    fig, ax = plt.subplots(figsize=(7, 3.8))
+    ax.hist(null, bins=20, color="#888", edgecolor="white")
+    ax.axvline(obs, color="red", linestyle="--",
+               label=f"observed baseline - pc = {obs:+.2f}")
+    ax.axvline(0, color="black", linewidth=0.7)
+    ax.set_xlabel("trace_z(half A) - trace_z(half B)   (random 64+64 EEG splits)")
+    ax.set_ylabel("random splits")
+    ax.set_title(
+        f"Pooled-128 EEG null (n = {pooled['n_random_splits']}, "
+        f"two-sided p = {pooled['p_two_sided']:.3f})")
+    ax.legend(fontsize=8)
+    fig.tight_layout(); fig.savefig(path, dpi=120); plt.close(fig)
+
+
+def _serialize_modality_split(mod_res: dict, *, jigsaws_side: bool = False) -> dict:
+    """Render `modality_split_analysis(...)` into JSON-safe native types. Set
+    `jigsaws_side=True` when serializing a JIGSAWS-split result (keys use
+    `jigsaws_feature_dim` instead of `mimic_feature_dim`)."""
     out: dict = {"_meta": dict(mod_res.get("_meta", {}))}
+    dim_key = "jigsaws_feature_dim" if jigsaws_side else "mimic_feature_dim"
     for mod, block in mod_res.items():
         if mod == "_meta":
             continue
-        m_out: dict = {"mimic_feature_dim": int(block["mimic_feature_dim"])}
+        m_out: dict = {dim_key: int(block[dim_key])}
         for binning in ("fixed", "tertile"):
             sub = block[binning]
             pr = sub["primary"]; bs = sub["bootstrap"]
@@ -300,10 +350,11 @@ def _serialize_modality_split(mod_res: dict) -> dict:
     return out
 
 
-def _modality_split_plot(mod_res: dict, path: Path) -> None:
-    """2x3 grid: row 0 = fixed-cutoff bootstrap, row 1 = tertile bootstrap.
-    Each column is one Mimic modality. Three violins-per-panel (Low/Mid/High).
-    Shared y-axis for magnitude comparison."""
+def _modality_split_plot(mod_res: dict, path: Path, *,
+                         title: Optional[str] = None) -> None:
+    """2x3 (or 2xK) grid: row 0 = fixed-cutoff bootstrap, row 1 = tertile
+    bootstrap. Each column is one modality. Three strips per panel
+    (Low/Mid/High). Shared y-axis for magnitude comparison."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -350,8 +401,8 @@ def _modality_split_plot(mod_res: dict, path: Path) -> None:
     axes[0, 0].set_ylabel("per-cell z\n(fixed-cutoff)")
     axes[1, 0].set_ylabel("per-cell z\n(tertile)")
     fig.suptitle(
-        f"Step 10 — Mimic-side modality split "
-        f"(stratified bootstrap, B = {mod_res['_meta']['n_bootstraps']})",
+        title or (f"Step 10 — Mimic-side modality split "
+                  f"(stratified bootstrap, B = {mod_res['_meta']['n_bootstraps']})"),
         y=1.02)
     fig.tight_layout()
     fig.savefig(path, dpi=120, bbox_inches="tight")
@@ -684,6 +735,59 @@ def _ensure_assertions(rdm_j: np.ndarray, rdm_e: np.ndarray, coupling: np.ndarra
         checks.append({"name": "modality_split_per_cell_z_shape_clean",
                        "pass": bool(shape_ok)})
 
+    # Step 11 JIGSAWS-side split checks.
+    jms = results.get("jigsaws_modality_split") or {}
+    if jms and "_meta" in jms:
+        mods = [m for m in jms.keys() if m != "_meta"]
+        checks.append({
+            "name": "jigsaws_modality_split_present",
+            "pass": bool(set(mods) == {"gestures", "kinematics"}),
+        })
+        no_degen_j = all(
+            int(jms[m][b]["bootstrap"].get("n_degenerate", 0)) == 0
+            for m in mods for b in ("fixed", "tertile")
+        )
+        checks.append({
+            "name": "jigsaws_modality_split_no_degenerate",
+            "pass": bool(no_degen_j),
+        })
+
+    # Comparison A checks.
+    ca = results.get("comparison_a") or {}
+    if ca and "primary" in ca:
+        pr = ca["primary"]
+        shape_ok = tuple(pr["coupling_shape"]) == (
+            int(sum(ca["tier_counts_j"])), int(sum(ca["tier_counts_e"])))
+        checks.append({
+            "name": "comparison_a_coupling_shape",
+            "pass": bool(shape_ok),
+        })
+        bs = ca.get("bootstrap") or {}
+        checks.append({
+            "name": "comparison_a_bootstrap_no_degenerate",
+            "pass": bool(int(bs.get("n_degenerate", 0)) == 0),
+        })
+        # Tier counts preserved between primary and bootstrap.
+        preserved = (
+            tuple(bs.get("tier_counts_j", ())) == tuple(ca["tier_counts_j"])
+            and tuple(bs.get("tier_counts_e", ())) == tuple(ca["tier_counts_e"])
+        )
+        checks.append({
+            "name": "comparison_a_bootstrap_tier_counts_preserved",
+            "pass": bool(preserved),
+        })
+
+    # P1/P3/P4 diagnostics presence.
+    if results.get("eeg_baseline_pc_correlation"):
+        checks.append({"name": "eeg_baseline_pc_correlation_populated",
+                       "pass": True})
+    if results.get("eeg_pooled_random_split_null"):
+        checks.append({"name": "eeg_pooled_random_split_null_populated",
+                       "pass": True})
+    if results.get("eye_coupling_diagnostic"):
+        checks.append({"name": "eye_coupling_diagnostic_populated",
+                       "pass": True})
+
     results["checks"] = checks
     return checks
 
@@ -703,6 +807,11 @@ def run(config: dict,
     n_perms = int(n_perms_override or config["n_perms"])
     subsample_n = int(subsample_override or config["subsample_per_tier"])
     seed = int(config["seed"])
+    modality_split_n_perms = int(
+        config.get("modality_split_n_perms", n_perms))
+    modality_split_n_bootstraps = int(
+        config.get("modality_split_n_bootstraps",
+                   config.get("trial_null_n_subsamples", 30)))
 
     # ===== Step 1: JIGSAWS features =====
     log.info("Step 1: building JIGSAWS feature frame ...")
@@ -1083,7 +1192,9 @@ def run(config: dict,
     if ("tier_fixed" in jr_frame.columns and "tier_fixed" in er_frame.columns
             and not smoke_fraction):
         log.info("Step 10: Mimic-side modality split "
-                 "(baseline / predictive-coding / eye)...")
+                 "(baseline / predictive-coding / eye) "
+                 "(B=%d, n_perms=%d)...",
+                 modality_split_n_bootstraps, modality_split_n_perms)
         try:
             mod_res = modality_split_analysis(
                 features_j=jr_frame[j_feat_cols].to_numpy(dtype=np.float64),
@@ -1096,8 +1207,8 @@ def run(config: dict,
                 tiers_e_fixed=er_frame["tier_fixed"].to_numpy(),
                 tier_names=TIER_NAMES,
                 epsilon=float(config["gw_epsilon"]),
-                n_perms=n_perms,
-                n_bootstraps=int(config.get("trial_null_n_subsamples", 30)),
+                n_perms=modality_split_n_perms,
+                n_bootstraps=modality_split_n_bootstraps,
                 seed=seed,
                 entropic_gw_fn=_egw_with_eps,
                 pairwise_rdm_fn=pairwise_cosine_rdm,
@@ -1108,8 +1219,248 @@ def run(config: dict,
         except Exception as e:
             log.warning("modality split failed: %s", e)
 
-    # ===== Step 11: MDS plots =====
-    log.info("Step 11: MDS plots ...")
+    # ----- P1: baseline/pc EEG correlation diagnostic -----
+    eeg_corr: dict = {}
+    try:
+        log.info("Step 10 diagnostics: baseline/pc EEG correlation...")
+        corr = eeg_baseline_pc_correlation(
+            features_e_full=er_frame[e_feat_cols].to_numpy(dtype=np.float64),
+            baseline_cols=mod_cols_split["eeg_baseline"],
+            pc_cols=mod_cols_split["eeg_predictive_coding"],
+            e_cols_full=e_feat_cols,
+        )
+        eeg_corr = {k: v for k, v in corr.items() if k != "per_trial_pearson_r"}
+        eeg_corr["per_trial_pearson_r"] = corr["per_trial_pearson_r"].tolist()
+        _eeg_corr_plot(corr, plots_dir / "eeg_baseline_pc_correlation.png")
+    except Exception as e:
+        log.warning("EEG correlation diagnostic failed: %s", e)
+
+    # ----- P3: pooled-128 EEG random-split negative control -----
+    eeg_pooled_null: dict = {}
+    if modality_serialized and "tier_fixed" in jr_frame.columns and not smoke_fraction:
+        try:
+            log.info("Step 10 diagnostics: pooled-128 EEG random-split null...")
+            pooled = pooled_eeg_random_split_null(
+                features_j=jr_frame[j_feat_cols].to_numpy(dtype=np.float64),
+                tiers_j=jr_frame["tier_fixed"].to_numpy(),
+                features_e_full=er_frame[e_feat_cols].to_numpy(dtype=np.float64),
+                e_cols_full=e_feat_cols,
+                eeg_combined_cols=(mod_cols_split["eeg_baseline"]
+                                   + mod_cols_split["eeg_predictive_coding"]),
+                half_size=len(mod_cols_split["eeg_baseline"]),
+                tiers_e=er_frame["tier_fixed"].to_numpy(),
+                tier_names=TIER_NAMES,
+                epsilon=float(config["gw_epsilon"]),
+                n_perms=200, n_random_splits=20, seed=seed,
+                entropic_gw_fn=_egw_with_eps,
+                pairwise_rdm_fn=pairwise_cosine_rdm,
+            )
+            # Observed baseline-vs-pc z delta under fixed-cutoff binning.
+            fb_zs = {m: modality_serialized[m]["fixed"]["primary"]["trace_z_score"]
+                     for m in ("eeg_baseline", "eeg_predictive_coding")}
+            observed_delta = float(
+                fb_zs["eeg_baseline"] - fb_zs["eeg_predictive_coding"])
+            null_delta = np.asarray(pooled["delta_distribution"])
+            # Two-sided p = (1 + #{|null| >= |obs|}) / (1 + n).
+            n = null_delta.size
+            p_two_sided = (1.0 + float((np.abs(null_delta)
+                                        >= abs(observed_delta)).sum())) / (1.0 + n)
+            eeg_pooled_null = {
+                "n_random_splits": int(pooled["n_random_splits"]),
+                "half_size": int(pooled["half_size"]),
+                "delta_distribution": null_delta.tolist(),
+                "delta_median": float(pooled["delta_median"]),
+                "delta_p05": float(pooled["delta_p05"]),
+                "delta_p95": float(pooled["delta_p95"]),
+                "delta_abs_median": float(pooled["delta_abs_median"]),
+                "delta_abs_p95": float(pooled["delta_abs_p95"]),
+                "observed_delta_baseline_minus_pc": observed_delta,
+                "p_two_sided": float(p_two_sided),
+            }
+            _eeg_pooled_plot(eeg_pooled_null,
+                             plots_dir / "eeg_pooled_random_split.png")
+        except Exception as e:
+            log.warning("pooled-128 EEG null failed: %s", e)
+
+    # ----- P4: eye-only coupling-matrix diagnostic -----
+    eye_coupling_diag: dict = {}
+    if modality_serialized:
+        try:
+            log.info("Step 10 diagnostics: eye-only coupling matrix check...")
+            eye_cols = mod_cols_split["eye"]
+            col_to_idx = {c: i for i, c in enumerate(e_feat_cols)}
+            eye_idx = np.array([col_to_idx[c] for c in eye_cols], dtype=np.int64)
+            eye_feat = er_frame[e_feat_cols].to_numpy(dtype=np.float64)[:, eye_idx]
+            eye_primary = mod_res["eye"]["fixed"]["primary"]
+            # Reconstruct the eye coupling cheaply (fixed-cutoff primary).
+            # The primary dict does not persist the full coupling; we just run
+            # the GW one more time to inspect the coupling directly.
+            Cj_eye = pairwise_cosine_rdm(
+                jr_frame[j_feat_cols].to_numpy(dtype=np.float64))
+            Ce_eye = pairwise_cosine_rdm(eye_feat)
+            _dist, T_eye = _egw_with_eps(Cj_eye, Ce_eye,
+                                         float(config["gw_epsilon"]))
+            eye_coupling_diag = coupling_matrix_diagnostics(T_eye, eye_feat)
+        except Exception as e:
+            log.warning("eye coupling diagnostic failed: %s", e)
+
+    # ===== Step 11: JIGSAWS-side modality split (P2) =====
+    jigsaws_modality_serialized: dict = {}
+    if ("tier_fixed" in jr_frame.columns and not smoke_fraction):
+        log.info("Step 11: JIGSAWS-side modality split "
+                 "(gestures / kinematics) (B=%d, n_perms=%d)...",
+                 modality_split_n_bootstraps, modality_split_n_perms)
+        try:
+            j_mod_cols = jigsaws_modality_columns(list(config["gestures_pool"]))
+            jmod_res = jigsaws_modality_split_analysis(
+                features_j_full=jr_frame[j_feat_cols].to_numpy(dtype=np.float64),
+                j_cols_full=j_feat_cols,
+                modality_columns=j_mod_cols,
+                tiers_j_tertile=jr_frame["tier"].to_numpy(),
+                tiers_j_fixed=jr_frame["tier_fixed"].to_numpy(),
+                features_e=er_frame[e_feat_cols].to_numpy(dtype=np.float64),
+                tiers_e_tertile=er_frame["tier"].to_numpy(),
+                tiers_e_fixed=er_frame["tier_fixed"].to_numpy(),
+                tier_names=TIER_NAMES,
+                epsilon=float(config["gw_epsilon"]),
+                n_perms=modality_split_n_perms,
+                n_bootstraps=modality_split_n_bootstraps,
+                seed=seed,
+                entropic_gw_fn=_egw_with_eps,
+                pairwise_rdm_fn=pairwise_cosine_rdm,
+            )
+            jigsaws_modality_serialized = _serialize_modality_split(
+                jmod_res, jigsaws_side=True)
+            _modality_split_plot(
+                jmod_res, plots_dir / "jigsaws_modality_split.png",
+                title=f"Step 11 — JIGSAWS-side modality split "
+                       f"(stratified bootstrap, B = {jmod_res['_meta']['n_bootstraps']})")
+        except Exception as e:
+            log.warning("JIGSAWS-side modality split failed: %s", e)
+
+    # ===== COMPARISON A: practice manifold =====
+    # NEW Comparison A residualization drops the tier-defining nuisance so the
+    # skill / practice signal survives. JIGSAWS side drops `surgeon` because
+    # the N/I/E label is constant per surgeon; Mimic side drops `subject_id`
+    # because experience_trials is constant per subject.
+    comparison_a_results: dict = {}
+    if not smoke_fraction:
+        log.info("Comparison A: residualization (task+trial_index on J; "
+                 "task_module+dominant_hand+age on Mimic)...")
+        try:
+            from skill_manifold.residualize import residualize as _residualize
+            jr_a = _residualize(
+                jf, j_feat_cols,
+                categorical=["task"],
+                ordinal=["trial_index_within_surgeon_task"],
+            )
+            er_a = _residualize(
+                ef, e_feat_cols,
+                categorical=["task_module", "dominant_hand"],
+                ordinal=["age"],
+            )
+            jf_a = jr_a.residuals.copy()
+            ef_a = er_a.residuals.copy()
+
+            # JIGSAWS tiers: categorical E/I/N -> Low/Mid/High.
+            jf_a["tier"] = assign_jigsaws_skill_tier(jf_a["skill"].to_numpy())
+            # Mimic tiers: tertile of per-subject experience_trials (practice depth).
+            ef_a, exp_cutoffs = add_tier_column(
+                ef_a, "experience_trials", tier_col="tier")
+
+            log.info("Comparison A: all-trials block-null (JIGSAWS E/I/N x "
+                     "Mimic experience-tertile)...")
+            comp_a_primary = trial_level_block_null_all_trials(
+                features_j=jf_a[j_feat_cols].to_numpy(dtype=np.float64),
+                tiers_j=jf_a["tier"].to_numpy(),
+                features_e=ef_a[e_feat_cols].to_numpy(dtype=np.float64),
+                tiers_e=ef_a["tier"].to_numpy(),
+                tier_names=TIER_NAMES,
+                epsilon=float(config["gw_epsilon"]),
+                n_perms=n_perms, seed=seed,
+                entropic_gw_fn=_egw_with_eps,
+                pairwise_rdm_fn=pairwise_cosine_rdm,
+            )
+            log.info("Comparison A: stratified bootstrap (B=%d)...",
+                     int(config.get("trial_null_n_subsamples", 30)))
+            comp_a_bootstrap = subsample_robustness_stratified(
+                features_j=jf_a[j_feat_cols].to_numpy(dtype=np.float64),
+                tiers_j=jf_a["tier"].to_numpy(),
+                features_e=ef_a[e_feat_cols].to_numpy(dtype=np.float64),
+                tiers_e=ef_a["tier"].to_numpy(),
+                tier_names=TIER_NAMES,
+                epsilon=float(config["gw_epsilon"]),
+                n_perms=max(200, n_perms // 5),
+                n_bootstraps=int(config.get("trial_null_n_subsamples", 30)),
+                seed=seed,
+                entropic_gw_fn=_egw_with_eps,
+                pairwise_rdm_fn=pairwise_cosine_rdm,
+            )
+            comp_a_verdict = stratified_bootstrap_verdict(
+                comp_a_bootstrap, TIER_NAMES)
+
+            comparison_a_results = {
+                "description": (
+                    "Comparison A — practice manifold. JIGSAWS tiered by "
+                    "self-reported E/I/N (N->Low, I->Mid, E->High); Mimic "
+                    "tiered by tertile of per-subject non-first-try "
+                    "experience_trials count (practice-depth proxy)."),
+                "tier_counts_j": comp_a_primary["tier_counts_j"].tolist(),
+                "tier_counts_e": comp_a_primary["tier_counts_e"].tolist(),
+                "mimic_experience_cutoffs": exp_cutoffs.as_dict(),
+                "primary": {
+                    "observed_diag_mass": float(comp_a_primary["observed"]),
+                    "expected_trace_under_null":
+                        float(comp_a_primary["expected_trace_under_null"]),
+                    "null_mean": float(comp_a_primary["null_mean"]),
+                    "null_std": float(comp_a_primary["null_std"]),
+                    "trace_p_value": float(comp_a_primary["p_value"]),
+                    "trace_z_score": float(comp_a_primary["z_score"]),
+                    "per_cell_z": np.asarray(
+                        comp_a_primary["per_cell_z"]).tolist(),
+                    "per_cell_observed": np.asarray(
+                        comp_a_primary["per_cell_observed"]).tolist(),
+                    "per_cell_expected": np.asarray(
+                        comp_a_primary["per_cell_expected"]).tolist(),
+                    "block_mass": np.asarray(
+                        comp_a_primary["block_mass"]).tolist(),
+                    "expected_block_mass": np.asarray(
+                        comp_a_primary["expected_block_mass"]).tolist(),
+                    "coupling_shape": list(comp_a_primary["coupling_shape"]),
+                    "row_sum_drift": float(comp_a_primary["row_sum_drift"]),
+                    "col_sum_drift": float(comp_a_primary["col_sum_drift"]),
+                    "n_permutations": int(comp_a_primary["n_permutations"]),
+                    "gw_distance": float(comp_a_primary["gw_distance"]),
+                    "epsilon": float(comp_a_primary["epsilon"]),
+                    "tier_names": list(comp_a_primary["tier_names"]),
+                },
+                "bootstrap": _serialize_stratified(comp_a_bootstrap),
+                "verdict": dict(comp_a_verdict),
+                "residualization_diagnostics": {
+                    "jigsaws_max_r2_feature": float(jr_a.r2_per_feature.max()),
+                    "jigsaws_max_post_fit_r2":
+                        float(jr_a.post_fit_r2.max()),
+                    "mimic_max_r2_feature": float(er_a.r2_per_feature.max()),
+                    "mimic_max_post_fit_r2":
+                        float(er_a.post_fit_r2.max()),
+                    "jigsaws_nuisances": ["task", "trial_index_within_surgeon_task"],
+                    "mimic_nuisances":   ["task_module", "dominant_hand", "age"],
+                },
+            }
+            _trial_block_null_plot(
+                comp_a_primary,
+                plots_dir / "comparison_a_block_null.png",
+                show_expected=True)
+            _stratified_bootstrap_plot(
+                comp_a_bootstrap, comp_a_verdict,
+                plots_dir / "comparison_a_bootstrap.png",
+                title=f"Comparison A stratified bootstrap (B = {comp_a_bootstrap['n_bootstraps']})")
+        except Exception as e:
+            log.warning("Comparison A failed: %s", e)
+            comparison_a_results = {"skipped_reason": str(e)}
+
+    # ===== Step 12 (ex-Step 11): MDS plots =====
+    log.info("Step 12: MDS plots ...")
     _mds_plot(j_feat_mat, jr_frame["tier"].to_numpy(),
               plots_dir / "mds_jigsaws.png", "JIGSAWS residualized features (MDS)")
     _mds_plot(e_feat_mat, er_frame["tier"].to_numpy(),
@@ -1119,7 +1470,9 @@ def run(config: dict,
     results = {
         "config_used": {"n_perms": n_perms, "gw_epsilon": float(config["gw_epsilon"]),
                          "subsample_per_tier": subsample_n, "seed": seed,
-                         "smoke_fraction": smoke_fraction},
+                         "smoke_fraction": smoke_fraction,
+                         "modality_split_n_perms": modality_split_n_perms,
+                         "modality_split_n_bootstraps": modality_split_n_bootstraps},
         "coverage": {
             "jigsaws_trials": int(len(jr_frame)),
             "eeg_eye_trials": int(len(er_frame)),
@@ -1216,6 +1569,11 @@ def run(config: dict,
         "tertile_bootstrap_stratified": tertile_bootstrap_serialized,
         "tertile_bootstrap_stratified_verdict": tertile_bootstrap_verdict,
         "modality_split": modality_serialized,
+        "eeg_baseline_pc_correlation": eeg_corr,
+        "eeg_pooled_random_split_null": eeg_pooled_null,
+        "eye_coupling_diagnostic": eye_coupling_diag,
+        "jigsaws_modality_split": jigsaws_modality_serialized,
+        "comparison_a": comparison_a_results,
         "residualization_diagnostics": {
             "max_post_fit_r2_jigsaws": max_post_r2_j,
             "max_post_fit_r2_eeg_eye": max_post_r2_e,
@@ -1507,6 +1865,153 @@ def _write_markdown_report(results: dict, path: Path) -> None:
                     )
             lines.append("")
         lines.append("![modality_split](plots/modality_split.png)")
+        lines.append("")
+
+    # --- P1: EEG baseline/pc correlation ---
+    ec = results.get("eeg_baseline_pc_correlation") or {}
+    if ec:
+        lines.append("### Step 10 — P1 diagnostic: EEG baseline/pc correlation")
+        lines.append("")
+        lines.append(
+            f"Per-trial Pearson r between mean-pooled baseline and pc EEG: "
+            f"median = **{ec['median']:+.2f}** (|r| median = {ec['median_abs']:.2f}, "
+            f"5-95 % = {ec['p05']:+.2f} to {ec['p95']:+.2f}); |r| > 0.5 on "
+            f"**{ec['frac_abs_gt_0p5']:.2f}** of {ec['n_trials']} trials.")
+        lines.append(
+            "**Caveat.** Baseline and pc encoders consume the same Phase 1 "
+            "EEG windows and are therefore not independent evidence streams; "
+            "per-modality verdicts should be read with the dependence in mind.")
+        lines.append("")
+        lines.append("![eeg_base_pc_corr](plots/eeg_baseline_pc_correlation.png)")
+        lines.append("")
+
+    # --- P3: pooled-128 EEG random-split null ---
+    pool = results.get("eeg_pooled_random_split_null") or {}
+    if pool:
+        lines.append("### Step 10 — P3 diagnostic: Pooled-128 EEG random-split null")
+        lines.append("")
+        lines.append(
+            f"Observed baseline-minus-pc trace_z delta = "
+            f"**{pool['observed_delta_baseline_minus_pc']:+.2f}**. "
+            f"Random 64+64 splits of the combined 128 EEG dims "
+            f"({pool['n_random_splits']} draws): median delta "
+            f"{pool['delta_median']:+.2f}, 5-95 % "
+            f"[{pool['delta_p05']:+.2f}, {pool['delta_p95']:+.2f}]. "
+            f"Two-sided p = **{pool['p_two_sided']:.3f}**.")
+        lines.append("")
+        lines.append("![eeg_pooled](plots/eeg_pooled_random_split.png)")
+        lines.append("")
+
+    # --- P4: eye coupling-matrix diagnostic ---
+    eye_d = results.get("eye_coupling_diagnostic") or {}
+    if eye_d:
+        lines.append("### Step 10 — P4 diagnostic: Eye-only coupling matrix")
+        lines.append("")
+        lines.append(
+            f"Eye-only cosine-distance matrix rank = **{eye_d['distance_rank']}**; "
+            f"near-duplicate rows (cos-distance < 1e-4) = "
+            f"{eye_d['near_duplicate_pairs']}/{eye_d['total_pairs']} "
+            f"({eye_d['near_duplicate_fraction']:.2%}). "
+            f"Pre-renorm coupling drift: row {eye_d['coupling_row_drift']:.2e}, "
+            f"col {eye_d['coupling_col_drift']:.2e}. "
+            f"({eye_d['n_trials']} trials, {eye_d['n_features']} features)")
+        lines.append("")
+
+    # --- Step 11: JIGSAWS-side modality split (P2) ---
+    jms = results.get("jigsaws_modality_split") or {}
+    if jms and "_meta" in jms:
+        meta = jms["_meta"]
+        tier_names = list(meta["tier_names"])
+        mods = [m for m in jms.keys() if m != "_meta"]
+        lines.append("## Step 11 — JIGSAWS-side modality split (P2)")
+        lines.append("")
+        lines.append(
+            "Mimic side = full combined 146-dim manifold for every comparison. "
+            "JIGSAWS side restricted to one modality at a time (dim: "
+            + ", ".join(f"{m} = {jms[m]['jigsaws_feature_dim']}" for m in mods)
+            + "). Duration (1-d) is omitted because cosine distance on 1-d "
+            + "features is degenerate.")
+        lines.append("")
+
+        for binning_label, binning_key in (("Fixed-cutoff binning", "fixed"),
+                                            ("Tertile binning",     "tertile")):
+            lines.append(f"### {binning_label}")
+            lines.append("")
+            lines.append("**Primary trial-level (observed):**")
+            lines.append("")
+            lines.append("| modality | trace_z | trace_p | "
+                         + " | ".join(f"z {n}<->{n}" for n in tier_names) + " |")
+            lines.append("|---|---:|---:|" + "---:|" * len(tier_names))
+            for m in mods:
+                pr = jms[m][binning_key]["primary"]
+                zs = " | ".join(f"{z:+.2f}" for z in pr["per_cell_z"])
+                lines.append(
+                    f"| {m} | {pr['trace_z_score']:+.2f} | "
+                    f"{pr['trace_p_value']:.4f} | {zs} |")
+            lines.append("")
+            lines.append("**Bootstrap (B = {}):**".format(meta["n_bootstraps"]))
+            lines.append("")
+            lines.append("| modality | cell | median | 5% | 95% | "
+                         "frac(\\|z\\|>2.39) | frac(z>0) | verdict |")
+            lines.append("|---|---|---:|---:|---:|---:|---:|:--:|")
+            for m in mods:
+                bs = jms[m][binning_key]["bootstrap"]
+                v = jms[m][binning_key]["verdict"]["verdict"]
+                for k, n in enumerate(tier_names):
+                    s = bs["summary"][f"per_cell_z_{n}"]
+                    lines.append(
+                        f"| {m} | {n}<->{n} | {s['median']:+.2f} | "
+                        f"{s['p05']:+.2f} | {s['p95']:+.2f} | "
+                        f"{bs['frac_per_cell_bonf'][k]:.2f} | "
+                        f"{bs['frac_per_cell_positive'][k]:.2f} | "
+                        f"{v if k == 0 else ''} |")
+            lines.append("")
+        lines.append("![jigsaws_modality_split](plots/jigsaws_modality_split.png)")
+        lines.append("")
+
+    # --- Comparison A: practice manifold ---
+    ca = results.get("comparison_a") or {}
+    if ca and "primary" in ca:
+        pr = ca["primary"]; bs = ca["bootstrap"]; v = ca["verdict"]
+        lines.append("## Comparison A — Practice manifold")
+        lines.append("")
+        lines.append(ca["description"])
+        lines.append("")
+        lines.append(
+            f"Tier counts JIGSAWS (N/I/E -> Low/Mid/High) = "
+            f"{dict(zip(pr['tier_names'], ca['tier_counts_j']))}, "
+            f"Mimic (experience-tertile) = "
+            f"{dict(zip(pr['tier_names'], ca['tier_counts_e']))}. "
+            f"Mimic experience cutoffs (non-first-try count): "
+            f"q33 = {ca['mimic_experience_cutoffs']['q33']:g}, "
+            f"q66 = {ca['mimic_experience_cutoffs']['q66']:g}.")
+        lines.append("")
+        lines.append(
+            f"**Primary (all-trials):** diag_mass = **{pr['observed_diag_mass']:.3f}** "
+            f"vs expected `{pr['expected_trace_under_null']:.3f}`, "
+            f"trace p = **{pr['trace_p_value']:.4f}**, "
+            f"trace z = **{pr['trace_z_score']:+.2f}**. "
+            f"Per-cell z-scores: "
+            + ", ".join(f"{n}<->{n} {z:+.2f}" for n, z in zip(
+                pr['tier_names'], pr['per_cell_z'])) + ".")
+        lines.append("")
+        lines.append(
+            f"**Stratified bootstrap (B = {bs['n_bootstraps']}):** ")
+        for k, name in enumerate(pr['tier_names']):
+            s = bs['summary'][f'per_cell_z_{name}']
+            lines.append(
+                f"- {name}<->{name}: median {s['median']:+.2f} "
+                f"(5-95% {s['p05']:+.2f}..{s['p95']:+.2f}); "
+                f"|z|>2.39 in {bs['frac_per_cell_bonf'][k]:.2f}; "
+                f"z>0 in {bs['frac_per_cell_positive'][k]:.2f}")
+        lines.append("")
+        lines.append(
+            f"**Verdict: {v['verdict']}** "
+            f"(Low med {v['low_median']:+.2f}, Mid med {v['mid_median']:+.2f}; "
+            f"frac(z>0) L/M {v['frac_positive_low']:.2f}/{v['frac_positive_mid']:.2f}).")
+        lines.append("")
+        lines.append("![comparison_a_block](plots/comparison_a_block_null.png)")
+        lines.append("![comparison_a_bootstrap](plots/comparison_a_bootstrap.png)")
         lines.append("")
 
     lines.append("## Verification checklist")
