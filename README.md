@@ -1,7 +1,6 @@
 # Surgical Skill Manifold: ViT Training, Cross-Dataset Geometry, and the FLS Inverted-U
 
-This repository contains the code, analyses, and grant-preliminary writeup for a
-Vanderbilt ECE capstone on objective surgical-skill assessment from neural and
+This repository contains the code and analyses on objective surgical-skill assessment from neural and
 behavioral signals. Three lines of work sit alongside each other:
 
 1. **A Vision Transformer model** that watches surgical video from the JIGSAWS
