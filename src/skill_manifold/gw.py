@@ -93,16 +93,29 @@ def gromov_wasserstein_centroids(rdm_a: np.ndarray,
 def entropic_gromov_wasserstein(c1: np.ndarray,
                                 c2: np.ndarray,
                                 *,
-                                epsilon: float = 0.01) -> GWResult:
+                                epsilon: float = 0.01,
+                                max_iter: Optional[int] = None,
+                                sinkhorn_max_iter: Optional[int] = None) -> GWResult:
     """Entropic GW for larger cost matrices. Returns distance and coupling.
 
     We call the log-enabled variant so we can recover the transport plan.
+
+    `max_iter` overrides POT's outer GW iteration cap (default 1000).
+    `sinkhorn_max_iter` is relayed as POT's inner-Sinkhorn `numItermax`
+    via **kwargs. Bumping it (e.g. to 5000) suppresses the "Sinkhorn did
+    not converge" warning on larger problems where the inner Sinkhorn
+    needs more steps than the outer GW. None = use POT defaults.
     """
     p = _uniform(c1.shape[0])
     q = _uniform(c2.shape[0])
+    extra: Dict[str, object] = {}
+    if max_iter is not None:
+        extra["max_iter"] = int(max_iter)
+    if sinkhorn_max_iter is not None:
+        extra["numItermax"] = int(sinkhorn_max_iter)
     T, log_dict = ot.gromov.entropic_gromov_wasserstein(
         c1, c2, p, q, loss_fun="square_loss",
-        epsilon=epsilon, log=True,
+        epsilon=epsilon, log=True, **extra,
     )
     # POT returns the coupling; the distance (as a scalar) is in log_dict.
     # Different POT versions name it differently.
@@ -110,7 +123,7 @@ def entropic_gromov_wasserstein(c1: np.ndarray,
     if dist is None:
         # Fall back to the explicit 2-form call.
         dist = ot.gromov.entropic_gromov_wasserstein2(
-            c1, c2, p, q, loss_fun="square_loss", epsilon=epsilon,
+            c1, c2, p, q, loss_fun="square_loss", epsilon=epsilon, **extra,
         )
     return GWResult(distance=float(dist), coupling=np.asarray(T, dtype=np.float64))
 

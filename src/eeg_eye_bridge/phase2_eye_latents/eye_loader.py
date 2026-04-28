@@ -37,12 +37,17 @@ def _interp_zeros(a: np.ndarray) -> np.ndarray:
 def load_eye_csv(
     path: Path,
     assumed_rate_hz: float = 50.0,
+    has_header: bool = False,
 ) -> EyeSeries:
     """
     Columns: 0-1 gaze, 17-18 pupil L/R, 19 movement type.
     Drops rows where movement_type in (0, 3) as noise (Exploration_Prompt).
+
+    has_header: True for FLS CSVs (first row is column names). Default False keeps
+    existing RAS callers (Eye/EYE/*.csv have no header) unchanged.
     """
-    raw = np.loadtxt(path, delimiter=",", dtype=np.float64)
+    skiprows = 1 if has_header else 0
+    raw = np.loadtxt(path, delimiter=",", dtype=np.float64, skiprows=skiprows)
     if raw.ndim == 1:
         raw = raw.reshape(1, -1)
     if raw.shape[1] < 20:
@@ -71,9 +76,16 @@ def load_eye_csv(
     )
 
 
-def load_eye_csv_full_for_events(path: Path) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Return full-series gaze (gx, gy) and movement_type for event stats (all rows)."""
-    raw = np.loadtxt(path, delimiter=",", dtype=np.float64)
+def load_eye_csv_full_for_events(
+    path: Path,
+    has_header: bool = False,
+) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Return full-series gaze (gx, gy) and movement_type for event stats (all rows).
+
+    has_header: True for FLS CSVs (first row is column names). Default False.
+    """
+    skiprows = 1 if has_header else 0
+    raw = np.loadtxt(path, delimiter=",", dtype=np.float64, skiprows=skiprows)
     if raw.ndim == 1:
         raw = raw.reshape(1, -1)
     gx = raw[:, 0].astype(np.float64)

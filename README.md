@@ -1,198 +1,152 @@
-# Surgical Gestures — ViT, Kinematics, and EEG–Eye Brain Alignment
+# Surgical Skill Manifold: ViT Training, Cross-Dataset Geometry, and the FLS Inverted-U
 
-Vision Transformer–based models for **JIGSAWS** surgical video: predict **robot kinematics**, **gesture** labels (15 classes), and **skill** level (Novice / Intermediate / Expert), with optional **neural alignment** via an **EEG–Eye Bridge** (RDM targets, RSA loss). Evaluation follows **8-fold Leave-One-User-Out (LOUO)** across surgeons.
+This repository contains the code, analyses, and grant-preliminary writeup for a
+Vanderbilt ECE capstone on objective surgical-skill assessment from neural and
+behavioral signals. Three lines of work sit alongside each other:
 
-A parallel **Skill-Manifold Comparison** pipeline (Gromov–Wasserstein between JIGSAWS and the EEG/Eye simulator) sits alongside the trainer and asks whether the two datasets organize surgical skill into compatible geometries, with permutation nulls, stratified bootstraps, and per-modality splits.
+1. **A Vision Transformer model** that watches surgical video from the JIGSAWS
+   dataset and jointly predicts robot kinematics, gesture labels, and skill
+   level, with optional EEG/Eye RDM-based neural alignment.
+2. **A cross-dataset Gromov–Wasserstein analysis** that asks whether JIGSAWS
+   (real bench-top dVRK) and the NIBIB-RPCCC RAS simulator organize surgical
+   skill into compatible geometries.
+3. **The capstone scientific contribution: an EEG-based inverted-U cognitive
+   engagement signature** in laparoscopic-surgery (FLS) trainees, with a
+   methodologically-matched comparison to three prior surgical-skill studies
+   (Nemani 2018 fNIRS, Soangra 2022 EMG, Lim 2025 EEG). Mid-skill subjects
+   occupy a distinct high-engagement cortical state from both novices and
+   experts, producing 79.2% Mid-vs-not-Mid binary classification accuracy at
+   N = 24. The result is preliminary data for a CLIP-HBA-MEG personalized
+   brain-aligned modeling grant.
 
-**Documentation in this repository:** [`README.md`](README.md) (this file) and [`CLAUDE.md`](CLAUDE.md) (architecture, configs, EEG–eye phases, conventions). Deeper or personal notes can live in a local `docs/` directory if you create one; it is gitignored by default.
+For deep architecture, configs, dataset disambiguation, and pipeline internals,
+see [`CLAUDE.md`](CLAUDE.md). 
+
+---
+
+## Capstone: the FLS inverted-U
+
+The headline analysis lives in [`pipeline/skill_manifold_fls_ushape.py`](pipeline/skill_manifold_fls_ushape.py)
+and runs five tests on the residualized, per-subject z-scored 40-d EEG feature
+vector: per-feature Mid-vs-rest t-tests against four pre-registered Lim et al.
+(2025) cognitive-load features, continuous-skill linear-vs-quadratic regression,
+per-subject U-position projection onto the Mid – (Low ∪ High) discriminant axis,
+a Nemani et al. (2018) anatomical topomap convergence check, and a four-classifier
+3-class comparison (LDA, top-5 by t-stat LDA, PCA-5 LDA, and Random Forest with
+in-fold RFE-5 mirroring Soangra et al. (2022)). A `--modality gaze` flag runs the
+same analyses on the simultaneously-recorded Tobii eye-tracking features as a
+modality-specificity control.
+
+![Per-subject U-position projection: Mid-tier subjects sit at high U-position; Low and High both sit at low U-position](reports/skill_manifold_fls/ushape/individual_u_positions.png)
+
+*Each subject is projected onto the Mid – (Low ∪ High) discriminant axis and
+plotted against composite skill score. Mid subjects (mean U-position +2.06)
+sit far above both Low (-2.25) and High (-1.96), showing the inverted-U
+geometry at the per-subject level. The continuous U-position is the
+individual-level quantity a personalized brain-aligned model could be trained
+to track during longitudinal training.*
+
+```bash
+export PYTHONPATH=src
+python pipeline/skill_manifold_fls_ushape.py --features_cache cache/skill_manifold_fls
+python pipeline/skill_manifold_fls_ushape.py --features_cache cache/skill_manifold_fls --modality gaze
+```
+
+Outputs land under [`reports/skill_manifold_fls/`](reports/skill_manifold_fls/):
+the markdown summary, JSON results, all plots, and the LaTeX grant prelim.
+
+A supporting calibrated-bootstrap power analysis (synthetic effect-size sweep
+that defends the cross-dataset bootstrap stability claim) lives in
+[`pipeline/bootstrap_power_analysis.py`](pipeline/bootstrap_power_analysis.py).
 
 ---
 
 ## Requirements
 
-- **Python 3.11+**
-- **PyTorch** — `pip install -r requirements.txt` installs pinned versions from PyPI. **Default PyPI wheels are CPU-only.** For an NVIDIA GPU, reinstall CUDA-enabled torch/torchvision (see the comment block at the top of [`requirements.txt`](requirements.txt)), e.g.:
-
-  ```bash
-  pip install torch==2.7.1 torchvision==0.22.1 --index-url https://download.pytorch.org/whl/cu126
-  ```
-
-- **`PYTHONPATH=src`** for all Python entrypoints (the shell tips below set this).
-
----
-
-## Setup
+- Python 3.11+
+- `pip install -r requirements.txt` installs pinned versions. Default PyPI
+  wheels are CPU-only; for an NVIDIA GPU, reinstall the CUDA-enabled torch
+  build (see header comment in [`requirements.txt`](requirements.txt)).
+- All Python entrypoints assume `PYTHONPATH=src`.
 
 ```bash
-cd Surgical_Gestures
-python -m venv .venv          # or: conda create -n surgical_gestures_venv python=3.11 -y && conda activate surgical_gestures_venv
+python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
-# If using GPU: reinstall torch/torchvision with the CUDA index (see above).
 export PYTHONPATH=src
-```
-
-**Windows (PowerShell):**
-
-```powershell
-cd path\to\Surgical_Gestures
-conda activate surgical_gestures_venv   # if using conda
-$env:PYTHONPATH = "src"
-python pipeline/generate_splits.py
 ```
 
 ---
 
-## Data layout
+## Repository layout
 
-Place the **JIGSAWS**-style tree under this repository (video, kinematics, transcriptions). Typically:
+| Directory | Purpose |
+|-----------|---------|
+| `src/` | Library code (models, training, eeg-eye bridge, skill-manifold modules) |
+| `pipeline/` | Entrypoints (training drivers, GW orchestrator, FLS U-shape, power analysis) |
+| `tests/` | Pytest suites for each major module |
+| `reports/` | Analysis outputs and grant prelim writeup |
+| `cache/` | Trial-level feature caches for the skill-manifold pipelines |
+| `data/`, `EEG/`, `Eye/`, `Gestures/` | Raw datasets (large, not committed) |
+| `checkpoints/` | Trained model weights |
 
-- **`Gestures/`** — per-task folders with `video/`, `kinematics/`, `transcriptions/`, meta files (see [`CLAUDE.md`](CLAUDE.md)).
-- **`EEG/`, `Eye/`** — needed only for the EEG–eye bridge phases (large; not committed to git).
-
-Large assets are listed in [`.gitignore`](.gitignore). **`data/splits/`** — generate LOUO split files locally:
-
-```bash
-python pipeline/generate_splits.py
-```
+The capstone-related files are concentrated in
+[`pipeline/skill_manifold_fls_ushape.py`](pipeline/skill_manifold_fls_ushape.py),
+[`src/skill_manifold/features_fls_eeg.py`](src/skill_manifold/features_fls_eeg.py),
+[`src/skill_manifold/features_fls_gaze.py`](src/skill_manifold/features_fls_gaze.py),
+and [`reports/skill_manifold_fls/`](reports/skill_manifold_fls/).
 
 ---
 
-## Train a single fold (main entrypoint)
+## Common entrypoints
+
+**Generate LOUO splits and train one fold:**
 
 ```bash
-export PYTHONPATH=src
+python pipeline/generate_splits.py
 python src/training/train_vit_system.py \
-  --config src/configs/baseline.yaml \
-  --data_root . \
-  --task Knot_Tying \
-  --split fold_1 \
+  --config src/configs/baseline.yaml --data_root . \
+  --task Knot_Tying --split fold_1 \
   --output_dir checkpoints/knot_fold1
 ```
 
-Useful configs include `baseline.yaml`, `brain_eye.yaml`, `bridge_eeg_rdm.yaml`, `bridge_joint_eye_eeg.yaml`. **`--task`** can be `Knot_Tying`, `Needle_Passing`, `Suturing`, or `all` where supported.
-
----
-
-## 8-fold LOUO (bash)
-
-Requires a Unix-like shell (Git Bash, WSL, or Linux/macOS).
+**Full 8-fold LOUO (Unix shell):**
 
 ```bash
-export PYTHONPATH=src
-./run_8fold_louo.sh                          # all tasks, folds 1–8, baseline config
-./run_8fold_louo.sh Knot_Tying 1 3         # one task, folds 1–3
-./run_8fold_louo.sh all 1 8 src/configs/brain_eye.yaml   # custom config
+./run_8fold_louo.sh                          # all tasks, baseline
+./run_8fold_louo.sh all 1 8 src/configs/brain_eye.yaml
 ```
 
-Brain-oriented 8-fold helper:
+**EEG–Eye Bridge (Phase 1 → 2 → 3 → optional Phase 4):**
 
 ```bash
-./run_8fold_louo_brain.sh
-```
-
-The script trains each fold, runs [`src/eval/evaluate.py`](src/eval/evaluate.py) on the test split, and expects to populate metrics under `eval_results/` for downstream aggregation.
-
----
-
-## Aggregate LOUO metrics
-
-```bash
-python pipeline/aggregate_louo_results.py
-```
-
-Defaults: read `eval_results/` for files matching `<Task>_test_fold_*.txt`, write `louo_summary.txt` and `louo_results.json`. If no files match, the script reports that and exits.
-
----
-
-## EEG–Eye Bridge (full pipeline)
-
-Runs Phase 1 (EEG export) → Phase 2 (eye consistency) → Phase 3 (RDMs + manifest) → optional Phase 4 (ViT training with bridge config):
-
-```bash
-export PYTHONPATH=src
 python pipeline/run_full_pipeline.py
+python pipeline/run_full_pipeline.py --phase1-synthetic --skip-train   # smoke
 ```
 
-Or run interactively via [`pipeline/pipeline.ipynb`](pipeline/pipeline.ipynb) (phase-by-phase with visualizations).
-
-Smoke test (synthetic Phase 1, no training):
+**Cross-dataset Gromov–Wasserstein (JIGSAWS ↔ RAS simulator):**
 
 ```bash
-python pipeline/run_full_pipeline.py --phase1-synthetic --skip-train
+python pipeline/skill_manifold_gw.py
+python pipeline/skill_manifold_gw.py --smoke
 ```
 
-Caches go under `cache/eeg_eye_bridge/`. Phase details and brain modes are documented in [`CLAUDE.md`](CLAUDE.md).
+**FLS within-dataset cross-modality GW (EEG ↔ gaze on the same subjects):**
+
+```bash
+python pipeline/skill_manifold_gw_fls.py --features_cache cache/skill_manifold_fls
+```
+
+For configs, brain modes, hyperparameter sweeps, and ablations, see
+[`CLAUDE.md`](CLAUDE.md).
 
 ---
 
-## Ablations
-
-| Script | Role |
-|--------|------|
-| [`run_ablation_study.ps1`](run_ablation_study.ps1) | Windows: four configs × three tasks × eight folds → `checkpoints/<config>/<task>/fold_n/` |
-| [`misc/run_ablations.sh`](misc/run_ablations.sh) | Unix (legacy): focused ablations (`brain`, `lambda`, `finetune`, `layers`, or `all`) into `checkpoints/ablations/` |
-
-Arbitrary **hyperparameter sweeps** are driven through [`pipeline/run_hparam_sweep.py`](pipeline/run_hparam_sweep.py), which takes a base YAML and a JSON sweep spec (e.g. `'{"loss_weights.brain": [0.01, 0.05, 0.1]}'`) and writes ranked val-metric summaries alongside each run's `best_model.pth`.
-
----
-
-## Skill-manifold comparison (Gromov–Wasserstein)
-
-A separate analysis pipeline that compares the per-trial skill geometry of JIGSAWS against the EEG/Eye simulator. It produces a headline GW distance, a tier-shuffle permutation null, OSATS per-axis breakdowns, trial-level block-diagonality tests with stratified bootstraps, and per-modality splits on both sides (`eeg_baseline` / `eeg_predictive_coding` / `eye` on the Mimic side; `gestures` / `kinematics` on the JIGSAWS side). Two framings:
-
-- **Comparison B — skill manifold:** JIGSAWS tiered by OSATS `grs_total`, Mimic by `performance`.
-- **Comparison A — practice manifold:** JIGSAWS tiered by self-reported E/I/N, Mimic by per-subject experience tertile.
-
-```bash
-export PYTHONPATH=src
-python pipeline/skill_manifold_gw.py                  # full run
-python pipeline/skill_manifold_gw.py --smoke          # 10% subsample smoke pass
-python pipeline/skill_manifold_gw.py --n_perms 200    # faster null
-```
-
-Outputs land in [`reports/skill_manifold/`](reports/skill_manifold): `report_comparison_B.md`, `results_comparison_B.json`, and plots under `plots/`. An interactive companion is [`pipeline/skills_manifold.ipynb`](pipeline/skills_manifold.ipynb). Knobs (seed, `n_perms`, `gw_epsilon`, subsample / bootstrap counts, gesture pool, OSATS axes) live in [`src/configs/skill_manifold.yaml`](src/configs/skill_manifold.yaml); the 27-task-ID → 9-module mapping is in [`src/configs/skill_manifold_task_modules.yaml`](src/configs/skill_manifold_task_modules.yaml).
-
-See [`CLAUDE.md`](CLAUDE.md#skill-manifold-comparison-gromovwasserstein) for the full stage-by-stage description. The Step 10 design is critiqued in [`pipeline/skills_manifold_modality_split_postmortem.txt`](pipeline/skills_manifold_modality_split_postmortem.txt).
-
----
-
-## Post-hoc representation analyses
-
-Probe what a trained checkpoint actually encodes:
-
-```bash
-# Skill-separability metrics (within vs between, silhouette) on one fold
-python pipeline/skill_manifold_analysis.py \
-    --checkpoint checkpoints/brain_eye/all/fold_1/best_model.pth \
-    --data_root . --task all --split fold_1
-
-# Ridge + k-NN probes aggregated across folds (skill, gesture, task, surgeon)
-python pipeline/representation_probe.py \
-    --aggregate_root checkpoints/brain_eye/all \
-    --data_root . --task all --split_family louo \
-    --output_dir analysis/representation_probe --stem brain_eye
-```
-
-Surgeon probe is interpreted as *lower is better* — a high surgeon accuracy means the model memorized motor style rather than generalizing across operators.
-
----
-
-## EEG–eye bridge tests
-
-```bash
-export PYTHONPATH=src
-python tests/eeg_eye_bridge/phase1/test_phase1_eeg.py
-python -m pytest tests/eeg_eye_bridge/phase2/test_phase2_eye_consistency.py -v
-python -m pytest tests/eeg_eye_bridge/phase3/test_phase3_rdms.py -v
-python tests/eeg_eye_bridge/phase4/test_phase4_vit_regularizer.py
-python tests/eeg_eye_bridge/test_phase5_integration_coordinator.py
-```
-
-## Skill-manifold tests
+## Tests
 
 ```bash
 export PYTHONPATH=src
 python -m pytest tests/skill_manifold -v
+python -m pytest tests/eeg_eye_bridge -v
 ```
 
 ---
@@ -201,24 +155,18 @@ python -m pytest tests/skill_manifold -v
 
 ```bibtex
 @software{surgical_gestures,
-  title={ViT-Based Surgical Gesture Recognition and Kinematics Prediction for dVRK},
-  author={Michael Haidar, Mai Bui, Aaron Liu},
-  year={2025},
-  url={https://github.com/Mhaidar117/Surgical_Gestures}
+  title  = {ViT-Based Surgical Gesture Recognition and the FLS Inverted-U},
+  author = {Michael Haidar, Mai Bui, Aaron Liu},
+  year   = {2026},
+  url    = {https://github.com/Mhaidar117/Surgical_Gestures}
 }
 ```
 
-JIGSAWS:
-
-```bibtex
-@article{jigsaws,
-  title={JIGSAWS: A Dataset for Surgical Skill Assessment},
-  author={Gao, Yixin and others},
-  journal={arXiv preprint arXiv:1506.04112},
-  year={2015}
-}
-```
+Datasets used in this work: **JIGSAWS** (Gao et al., MICCAI M2CAI 2014),
+**NIBIB-RPCCC-RAS** (Shafiei et al., PhysioNet 2023), and **NIBIB-RPCCC-FLS**
+(PhysioNet, eeg-eye-gaze-for-fls-tasks v1.0.0). Full citation details live in
+the grant prelim bibliography.
 
 ## License
 
-See [LICENSE](LICENSE) if present in the repository.
+See [LICENSE](LICENSE) if present.

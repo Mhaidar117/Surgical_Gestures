@@ -5,7 +5,16 @@ Gestures/
 data/
 cache/
 checkpoints/
-reports/
+
+# Reports directory: ignore all contents EXCEPT the README hero figure.
+# The chain of !rules is required because gitignore cannot re-include a file
+# whose parent directory is excluded — we have to un-ignore each level down.
+reports/*
+!reports/skill_manifold_fls/
+reports/skill_manifold_fls/*
+!reports/skill_manifold_fls/ushape/
+reports/skill_manifold_fls/ushape/*
+!reports/skill_manifold_fls/ushape/individual_u_positions.png
 
 # Local documentation (not pushed; only README.md + CLAUDE.md are tracked at root)
 docs/
@@ -65,3 +74,4 @@ node_modules/
 
 # Notebooks (optional — remove if you want to track these)
 *.ipynb_checkpoints/
+Skill Comparison Across Modalities/
